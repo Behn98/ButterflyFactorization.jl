@@ -1,0 +1,33 @@
+name = "ButterflyFactorization"
+uuid = "d087713a-a44a-41c8-9ea1-621cd90bd4cd"
+version = "0.1.0"
+authors = ["""Joshua <joshua.tetzner@uni-rostock.de\n>"""]
+
+[deps]
+BlockSparseMatrices = "1ef78180-cc57-4e70-b6ec-c3e471307147"
+H2Trees = "9db26ae3-82ff-4374-85e9-9ed87405fd16"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+LinearMaps = "7a12625a-238d-50fd-b39a-03d52299707e"
+OhMyThreads = "67456a42-1dca-4109-a031-0a68de7e3ad5"
+
+[weakdeps]
+BEAST = "bb4162c7-ba94-5a20-af32-d8ec4428bdd1"
+
+[extensions]
+BFBEAST = ["BEAST"]
+
+[compat]
+BEAST = "2.8.0"
+
+
+[extras]
+Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
+JuliaFormatter = "98e50ef6-434e-11e9-1051-2b60c6c9e899"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+OhMyThreads = "67456a42-1dca-4109-a031-0a68de7e3ad5"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
+TestItems = "1c621080-faea-4a02-84b6-bbd5e436b8fe"
+
+[targets]
+test = ["Aqua", "LinearAlgebra", "JuliaFormatter", "OhMyThreads", "Test", "TestItemRunner", "TestItems"]
