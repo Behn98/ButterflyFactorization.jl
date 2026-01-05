@@ -1,11 +1,11 @@
 
-function NestedCrossApproximation.AbstractKernelMatrix(
+function ButterflyFactorization.AbstractKernelMatrix(
     operator::BEAST.IntegralOperator,
     testspace::BEAST.Space,
     trialspace::BEAST.Space;
     quadstrat=BEAST.defaultquadstrat(operator, testspace, trialspace),
 )
-    return NestedCrossApproximation.BEASTKernelMatrix{scalartype(operator)}(
+    return ButterflyFactorization.BEASTKernelMatrix{scalartype(operator)}(
         BEAST.blockassembler(operator, testspace, trialspace; quadstrat=quadstrat)
     )
 end
@@ -19,7 +19,7 @@ function (f::BlockStoreFunctor)(v, m, n)
     return nothing
 end
 
-function (blk::NestedCrossApproximation.BEASTKernelMatrix)(matrixblock, tdata, sdata)
+function (blk::ButterflyFactorization.BEASTKernelMatrix)(matrixblock, tdata, sdata)
     blk.nearassembler(tdata, sdata, BlockStoreFunctor(matrixblock))
     return nothing
 end

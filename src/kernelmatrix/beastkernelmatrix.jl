@@ -16,5 +16,3 @@ function Base.size(M::BEASTKernelMatrix, dim=nothing)
         error("dim must be either 1 or 2")
     end
 end
-
-AdaptiveCrossApproximation.nextrc!(buf, A::BEASTKernelMatrix, i, j) = A(buf, i, j)

@@ -36,7 +36,7 @@ function PetrovGalerkinBF(
     )
 end
 
-function Base.size(A::PetrovGalerkinWNCA, dim=nothing)
+function Base.size(A::PetrovGalerkinBF, dim=nothing)
     if dim === nothing
         return (A.dim[1], A.dim[2])
     elseif dim == 1
@@ -48,7 +48,7 @@ function Base.size(A::PetrovGalerkinWNCA, dim=nothing)
     end
 end
 
-function Base.size(A::Adjoint{T}, dim=nothing) where {T<:PetrovGalerkinWNCA}
+function Base.size(A::Adjoint{T}, dim=nothing) where {T<:PetrovGalerkinBF}
     if dim === nothing
         return reverse(A.dim[1], A.dim[2])
     elseif dim == 1
