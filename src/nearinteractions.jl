@@ -20,7 +20,9 @@ function nears!(
         end
     end
     if nearnodes != []
-        push!(nearvalues, H2Trees.values(trialtree(tree), nearnodes))
+        #@show nearnodes
+        #@show H2Trees.values(trialtree(tree), nearnodes[1])
+        append!(nearvalues, H2Trees.values(trialtree(tree), node) for node in nearnodes)
         push!(values, H2Trees.values(testtree(tree), tnode))
     end
     if childnearnodes != []

@@ -15,9 +15,8 @@ end
 function PetrovGalerkinBF(
     operator, testspace, trialspace, tree::BlockTree; tol=1e-3, ntasks=Threads.nthreads()
 )
-    nearmatrix = AbstractKernelMatrix(
-        operator, testspace, trialspace; quadstrat=nearquadstrat
-    )
+    nearmatrix = AbstractKernelMatrix(operator, testspace, trialspace;)
+    farmatrix = AbstractKernelMatrix(operator, testspace, trialspace)
     values, nearvalues = nearinteractions(tree; isnear=isnear)
 
     blocks = Vector{Matrix{eltype(nearmatrix)}}(undef, length(values))
