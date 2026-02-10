@@ -10,7 +10,7 @@ function (t::isNearFunctor)(srctree, tsttree, snode, onode)
     olength = H2Trees.halfsize(tsttree, onode)
     scenter = H2Trees.center(srctree, snode)
     slength = H2Trees.halfsize(srctree, snode)
-    W = min(H2Trees.halfsize(srctree, snode), H2Trees.halfsize(tsttree, onode))
+    W = max(H2Trees.halfsize(srctree, snode), H2Trees.halfsize(tsttree, onode))
     ro = (sqrt(3) / 2) * olength
     rs = (sqrt(3) / 2) * slength
     if norm(scenter - ocenter) - (ro + rs) > t.α * W
