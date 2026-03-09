@@ -17,4 +17,4 @@ function Base.size(M::BEASTKernelMatrix, dim=nothing)
     end
 end
 
-AdaptiveCrossApproximation.nextrc!(buf, A::BEASTKernelMatrix, i, j) = A(buf, i, j)
+#AdaptiveCrossApproximation.nextrc!(buf, A::BEASTKernelMatrix, i, j) = A(buf, i, j)
