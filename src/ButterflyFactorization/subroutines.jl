@@ -13,6 +13,20 @@ struct BF
     BF(Q, R, P, NS, NO, k, τ) = new(Q, R, P, NS, NO, k, τ)
 end
 
+struct BF_Mats
+    Q::Matrix{ComplexF64}
+    R::Vector{Matrix{ComplexF64}}      #any source node on any level l∈[1:L] has exactly as many R-blocks as there are nodes on the corresponding obs level L-l+1
+    # where level 0 is the root of the tree
+    P::Matrix{ComplexF64}
+    NS::Int64
+    NO::Int64
+    k::Float64
+    τ::Float64
+    PermP::Vector{Int}          #permutation of source indices for P blocks, needed for correct assembly of R blocks
+    PermQ::Vector{Int}          #permutation of source indices for Q blocks, needed for correct assembly of R blocks
+    BF_Mats(Q, R, P, NS, NO, k, τ, PermP, PermQ) = new(Q, R, P, NS, NO, k, τ, PermP, PermQ)
+end
+
 struct BFapprox
     tree::H2Trees.BlockTree
     nearinteractions::Dict{Int64,Vector{Int64}}          #observernodeid --> sourcenodeid
@@ -20,6 +34,54 @@ struct BFapprox
     BFs::Vector{BF}
     NI::Vector{Matrix{ComplexF64}}
     BFapprox(tree, nearints, farints, BFs, NI) = new(tree, nearints, farints, BFs, NI)
+end
+
+abstract type Abstractcompressor end
+
+struct PartialQR <: Abstractcompressor
+    PartialQR() = new()
+end
+
+function (t::PartialQR)(
+    farassembler, src_index::Vector{Int}, obs_index::Vector{Int}, n_otilde::Int, ε::Float64
+)
+    n_obs = length(obs_index)
+    n_src = length(src_index)
+    n_otilde = min(n_otilde, n_obs)
+
+    # --- random row sampling (type stable) ---
+    idx = randperm(n_obs)
+    row = @view obs_index[idx[1:n_otilde]]
+    col = src_index  # full view, no copy
+
+    # --- assemble Z ---
+    Z = zeros(ComplexF64, n_otilde, n_src)
+    farassembler(Z, row, col)
+
+    # --- pivoted QR (LAPACK-backed) ---
+    Fqr = pqr(Z; rtol=ε)
+
+    Q = Fqr[1]
+    R = Fqr[2]
+    P = Fqr[3]
+
+    r = size(Q, 2)
+
+    # --- views to avoid allocations ---
+    Q1 = @view Q[:, 1:r]
+    R11 = UpperTriangular(@view R[1:r, 1:r])
+
+    # --- compute q_ks without inv ---
+    # tmp = Q1' * Z
+    tmp = Matrix{ComplexF64}(undef, r, n_src)
+    mul!(tmp, adjoint(Q1), Z)
+
+    # q_ks = R11 \ tmp
+    ldiv!(R11, tmp)
+
+    k = src_index[P[1:r]]
+
+    return tmp, k, r
 end
 
 function estimate_rank_3d(
@@ -210,6 +272,7 @@ function subroutine_BF_approx_treeh2(
         # Compute R blocks
         # --------------------------------------------------------------
         if !source_is_frozen && !obs_is_frozen
+            rowsizeR = 0
             for Overt in treeO[l]
                 for Ochild in children(testT, Overt)
                     obsindex = values(testT, Ochild)
@@ -232,7 +295,7 @@ function subroutine_BF_approx_treeh2(
                         q_ks, k_l, r_l = subroutine_getskelh2(
                             farassembler, srcindex, obsindex, c_s, c_o, a_s, a_o, τ, k
                         )
-
+                        rowsizeR += size(q_ks, 1)
                         getsubdict!(R, Svert)[Ochild] = q_ks
                         #push!(R, q_ks)
                         getsubdict!(K, Svert)[Ochild] = k_l
@@ -241,6 +304,8 @@ function subroutine_BF_approx_treeh2(
                     end
                 end
             end
+            @show l
+            @show rowsizeR
 
         elseif source_is_frozen && !obs_is_frozen
             @show source_is_frozen
@@ -314,6 +379,263 @@ function subroutine_BF_approx_treeh2(
     end
     result = BF(Q, R, P, NS, NO, τ, k)
     return result
+end
+
+function blockdiag(blocks::AbstractMatrix...)
+    isempty(blocks) && return zeros(0, 0)
+
+    T = promote_type(map(eltype, blocks)...)
+
+    rows = sum(size(b, 1) for b in blocks)
+    cols = sum(size(b, 2) for b in blocks)
+
+    M = zeros(T, rows, cols)
+
+    r = 1
+    c = 1
+    for B in blocks
+        nr, nc = size(B)
+        M[r:(r + nr - 1), c:(c + nc - 1)] .= B
+        r += nr
+        c += nc
+    end
+
+    return M
+end
+
+function subroutine_BF_approx_treeh2_mats(
+    farassembler,
+    H2Blocktree,
+    NO::Int,
+    NS::Int,
+    k::Float64,
+    τ::Float64,
+    Compressor::Abstractcompressor,
+)
+
+    # --- containers ---
+    #Q = Dict{Int,Matrix{ComplexF64}}()
+    Q = Matrix{ComplexF64}(undef, 0, 0)          #any source leaf has a Q-block related to the root of the obs sub tree
+    #any Q block has the dimension of R×number of source indices in the corresponding leaf
+    #R = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
+    R = Vector{Matrix{ComplexF64}}()      #any source node on any level l∈[1:L] has exactly as many R-blocks as there are nodes on the corresponding obs level L-l+1
+    # where level 0 is the root of the tree
+    #P = Dict{Int,Matrix{ComplexF64}}()
+    P = Matrix{ComplexF64}(undef, 0, 0)
+
+    K = Dict{Int,Dict{Int,Vector{Int}}}()
+    #K = Vector{Vector{Int}}()          #any source node on any level l∈[1:L] has exactly as many skeletons K as there are nodes on the corresponding obs level L-l+1
+    # where level 0 is the root of the tree
+    U = Dict{Int,Dict{Int,Vector{Int}}}()   #temporary unions
+
+    PermQ = Vector{Int}()          #permutation of source indices for Q blocks, needed for correct assembly of R blocks
+    PermP = Vector{Int}()          #permutation of source indices for P blocks, needed for correct assembly of R blocks
+    # ε-rank kept for future use
+    # εrank = Dict{Int, Dict{Int, Int}}()
+
+    # --- trees & helpers ---
+    trialT = H2Trees.trialtree(H2Blocktree)
+    testT = H2Trees.testtree(H2Blocktree)
+
+    values = H2Trees.values
+    center = H2Trees.center
+    halfsize = H2Trees.halfsize
+    children = H2Trees.children
+
+    treeS = h2treelevels(trialT, NS)
+    treeO = h2treelevels(testT, NO)
+
+    LS = length(treeS)
+    LO = length(treeO)
+    L = LS + LO
+
+    # ------------------------------------------------------------------
+    # Leaf-level Q
+    # ------------------------------------------------------------------
+    for Sleaf in treeS[LS]
+        srcindex = values(trialT, Sleaf)
+        push!(PermQ, srcindex...)
+        obsindex = values(testT, NO)
+        #isempty(srcindex) && continue
+        c_s = center(trialT, Sleaf)
+        c_o = center(testT, NO)
+        a_s = halfsize(trialT, Sleaf)
+        a_o = halfsize(testT, NO)
+        n_otilde = estimate_rank_3d(k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3)
+        q_ks, k_l, r_l = Compressor(farassembler, srcindex, obsindex, n_otilde, τ)
+        Q = blockdiag(Q, q_ks)
+        #Q[Sleaf] = q_ks
+        #push!(Q, q_ks)
+        #push!(K, k_l)
+        getsubdict!(K, Sleaf)[NO] = k_l
+        #getsubdict!(εrank, Sleaf)[NO] = r_l
+    end
+
+    source_is_frozen = false
+    obs_is_frozen = false
+
+    # ------------------------------------------------------------------
+    # Level traversal
+    # ------------------------------------------------------------------
+    for l in 1:(L - 1)
+        #K_new = Vector{Vector{Int}}()
+        l >= LS && (source_is_frozen = true)
+        l >= LO && (obs_is_frozen = true)
+
+        # --------------------------------------------------------------
+        # Build U (union of child skeletons)
+        # --------------------------------------------------------------
+        if !source_is_frozen
+            for Svert in treeS[LS - l]
+                U_S = getsubdict!(U, Svert)
+
+                for Overt in treeO[min(l, LO)]
+                    temp = Int[]
+                    # optional future optimization:
+                    # sizehint!(temp, estimated_size)
+
+                    for Schild in children(trialT, Svert)
+                        Ks = getsubdict!(K, Schild)
+                        ks = get(Ks, Overt, nothing)
+                        #ks === nothing && continue
+                        append!(temp, ks)
+                    end
+
+                    U_S[Overt] = temp
+                end
+            end
+        end
+
+        # --------------------------------------------------------------
+        # Compute R blocks
+        # --------------------------------------------------------------
+        if !source_is_frozen && !obs_is_frozen
+            rowsizeR = 0
+            R_temp1 = Matrix{ComplexF64}(undef, 0, 0)
+            for Overt in treeO[l]
+                R_temp2 = Vector{Matrix{ComplexF64}}()
+                for Ochild in children(testT, Overt)
+                    R_temp3 = Matrix{ComplexF64}(undef, 0, 0)
+                    obsindex = values(testT, Ochild)
+                    #isempty(obsindex) && continue
+                    c_o = center(testT, Ochild)
+                    a_o = halfsize(testT, Ochild)
+                    for Svert in treeS[LS - l]
+                        srcindex = U[Svert][Overt]
+                        #isempty(srcindex) && continue
+                        c_s = center(trialT, Svert)
+                        a_s = halfsize(trialT, Svert)
+
+                        n_otilde = estimate_rank_3d(
+                            k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3
+                        )
+                        q_ks, k_l, r_l = Compressor(
+                            farassembler, srcindex, obsindex, n_otilde, τ
+                        )
+                        R_temp3 = blockdiag(R_temp3, q_ks)
+                        rowsizeR += size(q_ks, 1)
+                        #getsubdict!(R, Svert)[Ochild] = q_ks
+
+                        #push!(R, q_ks)
+                        getsubdict!(K, Svert)[Ochild] = k_l
+                        #push!(K_new, k_l)
+                        #getsubdict!(εrank, Svert)[Ochild] = r_l
+                    end
+                    push!(R_temp2, R_temp3)
+                    R_temp3 = Matrix{ComplexF64}(undef, 0, 0)
+                end
+                R_temp1 = blockdiag(R_temp1, vcat(R_temp2...))
+                R_temp2 = Vector{Matrix{ComplexF64}}()
+            end
+            @show l
+            @show rowsizeR
+            push!(R, R_temp1)
+        elseif source_is_frozen && !obs_is_frozen
+            @show source_is_frozen
+            for Overt in treeO[l]
+                for Ochild in children(testT, Overt)
+                    obsindex = values(testT, Ochild)
+                    isempty(obsindex) && continue
+                    for Svert in treeS[1]
+                        #inner = get(K, Svert, nothing)
+                        #col = inner === nothing ? nothing : get(inner, Overt, nothing)
+                        #col === nothing && continue
+                        col = K[Svert][Overt]
+
+                        Z = zeros(ComplexF64, length(obsindex), length(col))
+                        farassembler(Z, obsindex, col)
+
+                        getsubdict!(R, Svert)[Ochild] = Z
+                        getsubdict!(K, Svert)[Ochild] = col
+                    end
+                end
+            end
+
+        elseif !source_is_frozen && obs_is_frozen
+            for Overt in treeO[LO]
+                obsindex = values(testT, Overt)
+                isempty(obsindex) && continue
+                for Svert in treeS[LS - l]
+                    #inner = get(U, Svert, nothing)
+                    #srcindex = inner === nothing ? nothing : get(inner, Overt, nothing)
+                    #srcindex === nothing && continue
+                    srcindex = U[Svert][Overt]
+
+                    c_s = center(trialT, Svert)
+                    c_o = center(testT, Overt)
+                    a_s = halfsize(trialT, Svert)
+                    a_o = halfsize(testT, Overt)
+
+                    n_otilde = estimate_rank_3d(
+                        k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3
+                    )
+                    q_ks, k_l, r_l = Compressor(
+                        farassembler, srcindex, obsindex, n_otilde, τ
+                    )
+
+                    getsubdict!(R, Svert)[Overt] = q_ks
+                    getsubdict!(K, Svert)[Overt] = k_l
+                    #getsubdict!(εrank, Svert)[Overt] = r_l
+                end
+            end
+
+        else
+            break
+        end
+        #K = K_new
+    end
+
+    # ------------------------------------------------------------------
+    # Final P blocks
+    # ------------------------------------------------------------------
+
+    for Oleaf in treeO[LO]
+        #inner = get(K, NS, nothing)
+        #col = inner === nothing ? nothing : get(inner, Oleaf, nothing)
+        #col === nothing && continue
+        col = K[NS][Oleaf]
+        row = values(testT, Oleaf)
+        push!(PermP, row...)
+        #isempty(row) && continue
+        Z = zeros(ComplexF64, length(row), length(col))
+        farassembler(Z, row, col)
+        P = blockdiag(P, Z)
+        #P[Oleaf] = Z
+        #push!(P, Z)
+    end
+    return BF_Mats(Q, R, P, NS, NO, τ, k, PermP, PermQ)
+end
+
+function applyBF_Mats(t::BF_Mats, v::Vector{ComplexF64})
+    y = v[t.PermQ]  #permute input vector according to Q blocks
+    y = t.Q * y
+    for R_block in t.R
+        y = R_block * y
+    end
+    y = t.P * y
+    y_out = zeros(ComplexF64, length(v))
+    y_out[t.PermP] = y  #permute output vector according to P blocks
+    return y_out
 end
 
 function apply_butterflyh2(H2Blocktree, Butterfly::BF, v::Vector{ComplexF64})
