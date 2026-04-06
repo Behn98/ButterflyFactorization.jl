@@ -14,10 +14,10 @@ struct BF
 end
 
 struct BF_Mats
-    Q::Matrix{ComplexF64}
-    R::Vector{Matrix{ComplexF64}}      #any source node on any level l∈[1:L] has exactly as many R-blocks as there are nodes on the corresponding obs level L-l+1
+    Q::AbstractMatrix{ComplexF64}
+    R::Vector{AbstractMatrix{ComplexF64}}      #any source node on any level l∈[1:L] has exactly as many R-blocks as there are nodes on the corresponding obs level L-l+1
     # where level 0 is the root of the tree
-    P::Matrix{ComplexF64}
+    P::AbstractMatrix{ComplexF64}
     NS::Int64
     NO::Int64
     k::Float64
@@ -403,6 +403,38 @@ function blockdiag(blocks::AbstractMatrix...)
     return M
 end
 
+function sparse_blockdiag(blocks::AbstractMatrix...)
+    isempty(blocks) && return spzeros(ComplexF64, 0, 0)
+
+    # Convert blocks to sparse to utilize SparseArrays.blockdiag
+    sparse_blocks = map(sparse, blocks)
+    return SparseArrays.blockdiag(sparse_blocks...)
+end
+
+function sparse_vcat(blocks::AbstractMatrix...)
+    isempty(blocks) && return spzeros(ComplexF64, 0, 0)
+
+    # Convert blocks to sparse and vertically concatenate
+    sparse_blocks = map(sparse, blocks)
+    return vcat(sparse_blocks...)
+end
+
+function blocksparse_blockdiag(blocks::AbstractMatrix...)
+    isempty(blocks) && return spzeros(ComplexF64, 0, 0)
+
+    # Assemble as a standard sparse matrix first, then convert to BlockSparseMatrix
+    sp_mat = SparseArrays.blockdiag(map(sparse, blocks)...)
+    return BlockSparseMatrix(sp_mat)
+end
+
+function blocksparse_vcat(blocks::AbstractMatrix...)
+    isempty(blocks) && return spzeros(ComplexF64, 0, 0)
+
+    # Vertically concatenate sparse matrices, then convert to BlockSparseMatrix
+    sp_mat = vcat(map(sparse, blocks)...)
+    return BlockSparseMatrix(sp_mat)
+end
+
 function subroutine_BF_approx_treeh2_mats(
     farassembler,
     H2Blocktree,
@@ -418,7 +450,7 @@ function subroutine_BF_approx_treeh2_mats(
     Q = Matrix{ComplexF64}(undef, 0, 0)          #any source leaf has a Q-block related to the root of the obs sub tree
     #any Q block has the dimension of R×number of source indices in the corresponding leaf
     #R = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
-    R = Vector{Matrix{ComplexF64}}()      #any source node on any level l∈[1:L] has exactly as many R-blocks as there are nodes on the corresponding obs level L-l+1
+    R = Vector{AbstractMatrix{ComplexF64}}()      #any source node on any level l∈[1:L] has exactly as many R-blocks as there are nodes on the corresponding obs level L-l+1
     # where level 0 is the root of the tree
     #P = Dict{Int,Matrix{ComplexF64}}()
     P = Matrix{ComplexF64}(undef, 0, 0)
@@ -463,7 +495,7 @@ function subroutine_BF_approx_treeh2_mats(
         a_o = halfsize(testT, NO)
         n_otilde = estimate_rank_3d(k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3)
         q_ks, k_l, r_l = Compressor(farassembler, srcindex, obsindex, n_otilde, τ)
-        Q = blockdiag(Q, q_ks)
+        Q = sparse_blockdiag(Q, q_ks)               #SPARSITY: blocksparse_ or sparse_
         #Q[Sleaf] = q_ks
         #push!(Q, q_ks)
         #push!(K, k_l)
@@ -513,7 +545,7 @@ function subroutine_BF_approx_treeh2_mats(
             rowsizeR = 0
             R_temp1 = Matrix{ComplexF64}(undef, 0, 0)
             for Overt in treeO[l]
-                R_temp2 = Vector{Matrix{ComplexF64}}()
+                R_temp2 = Vector{AbstractMatrix{ComplexF64}}()
                 for Ochild in children(testT, Overt)
                     R_temp3 = Matrix{ComplexF64}(undef, 0, 0)
                     obsindex = values(testT, Ochild)
@@ -532,7 +564,7 @@ function subroutine_BF_approx_treeh2_mats(
                         q_ks, k_l, r_l = Compressor(
                             farassembler, srcindex, obsindex, n_otilde, τ
                         )
-                        R_temp3 = blockdiag(R_temp3, q_ks)
+                        R_temp3 = sparse_blockdiag(R_temp3, q_ks)   #SPARSITY: blocksparse_ or sparse_
                         rowsizeR += size(q_ks, 1)
                         #getsubdict!(R, Svert)[Ochild] = q_ks
 
@@ -544,12 +576,13 @@ function subroutine_BF_approx_treeh2_mats(
                     push!(R_temp2, R_temp3)
                     R_temp3 = Matrix{ComplexF64}(undef, 0, 0)
                 end
-                R_temp1 = blockdiag(R_temp1, vcat(R_temp2...))
-                R_temp2 = Vector{Matrix{ComplexF64}}()
+                R_temp1 = sparse_blockdiag(R_temp1, sparse_vcat(R_temp2...))    #SPARSITY: blocksparse_ or sparse_
+                R_temp2 = Vector{AbstractMatrix{ComplexF64}}()
             end
             @show l
             @show rowsizeR
             push!(R, R_temp1)
+
         elseif source_is_frozen && !obs_is_frozen
             @show source_is_frozen
             for Overt in treeO[l]
@@ -619,7 +652,7 @@ function subroutine_BF_approx_treeh2_mats(
         #isempty(row) && continue
         Z = zeros(ComplexF64, length(row), length(col))
         farassembler(Z, row, col)
-        P = blockdiag(P, Z)
+        P = sparse_blockdiag(P, Z)              #SPARSITY: blocksparse_ or sparse_
         #P[Oleaf] = Z
         #push!(P, Z)
     end

@@ -8,6 +8,7 @@ using StaticArrays
 using Random
 using OhMyThreads
 using LowRankApprox
+using SparseArrays
 
 include("kernelmatrix/abstractkernelmatrix.jl")
 include("kernelmatrix/beastkernelmatrix.jl")
