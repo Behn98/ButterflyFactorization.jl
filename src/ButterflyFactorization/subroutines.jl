@@ -419,22 +419,6 @@ function sparse_vcat(blocks::AbstractMatrix...)
     return vcat(sparse_blocks...)
 end
 
-function blocksparse_blockdiag(blocks::AbstractMatrix...)
-    isempty(blocks) && return spzeros(ComplexF64, 0, 0)
-
-    # Assemble as a standard sparse matrix first, then convert to BlockSparseMatrix
-    sp_mat = SparseArrays.blockdiag(map(sparse, blocks)...)
-    return BlockSparseMatrix(sp_mat)
-end
-
-function blocksparse_vcat(blocks::AbstractMatrix...)
-    isempty(blocks) && return spzeros(ComplexF64, 0, 0)
-
-    # Vertically concatenate sparse matrices, then convert to BlockSparseMatrix
-    sp_mat = vcat(map(sparse, blocks)...)
-    return BlockSparseMatrix(sp_mat)
-end
-
 function subroutine_BF_approx_treeh2_mats(
     farassembler,
     H2Blocktree,
@@ -495,14 +479,9 @@ function subroutine_BF_approx_treeh2_mats(
         a_o = halfsize(testT, NO)
         n_otilde = estimate_rank_3d(k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3)
         q_ks, k_l, r_l = Compressor(farassembler, srcindex, obsindex, n_otilde, τ)
-        Q = sparse_blockdiag(Q, q_ks)               #SPARSITY: blocksparse_ or sparse_
-        #Q[Sleaf] = q_ks
-        #push!(Q, q_ks)
-        #push!(K, k_l)
+        Q = sparse_blockdiag(Q, q_ks)               #SPARSITY: sparse_
         getsubdict!(K, Sleaf)[NO] = k_l
-        #getsubdict!(εrank, Sleaf)[NO] = r_l
     end
-
     source_is_frozen = false
     obs_is_frozen = false
 
@@ -542,7 +521,7 @@ function subroutine_BF_approx_treeh2_mats(
         # Compute R blocks
         # --------------------------------------------------------------
         if !source_is_frozen && !obs_is_frozen
-            rowsizeR = 0
+            #rowsizeR = 0
             R_temp1 = Matrix{ComplexF64}(undef, 0, 0)
             for Overt in treeO[l]
                 R_temp2 = Vector{AbstractMatrix{ComplexF64}}()
@@ -564,50 +543,74 @@ function subroutine_BF_approx_treeh2_mats(
                         q_ks, k_l, r_l = Compressor(
                             farassembler, srcindex, obsindex, n_otilde, τ
                         )
-                        R_temp3 = sparse_blockdiag(R_temp3, q_ks)   #SPARSITY: blocksparse_ or sparse_
-                        rowsizeR += size(q_ks, 1)
+                        R_temp3 = sparse_blockdiag(R_temp3, q_ks)   #SPARSITY: sparse_
+                        #rowsizeR += size(q_ks, 1)
                         #getsubdict!(R, Svert)[Ochild] = q_ks
-
-                        #push!(R, q_ks)
                         getsubdict!(K, Svert)[Ochild] = k_l
-                        #push!(K_new, k_l)
                         #getsubdict!(εrank, Svert)[Ochild] = r_l
                     end
                     push!(R_temp2, R_temp3)
                     R_temp3 = Matrix{ComplexF64}(undef, 0, 0)
                 end
-                R_temp1 = sparse_blockdiag(R_temp1, sparse_vcat(R_temp2...))    #SPARSITY: blocksparse_ or sparse_
+                R_temp1 = sparse_blockdiag(R_temp1, sparse_vcat(R_temp2...))    #SPARSITY: sparse_
                 R_temp2 = Vector{AbstractMatrix{ComplexF64}}()
             end
-            @show l
-            @show rowsizeR
+            #@show l
+            #@show rowsizeR
             push!(R, R_temp1)
 
         elseif source_is_frozen && !obs_is_frozen
             @show source_is_frozen
+            R_temp1 = Matrix{ComplexF64}(undef, 0, 0)
             for Overt in treeO[l]
+                R_temp2 = Vector{AbstractMatrix{ComplexF64}}()
                 for Ochild in children(testT, Overt)
+                    R_temp3 = Matrix{ComplexF64}(undef, 0, 0)
                     obsindex = values(testT, Ochild)
-                    isempty(obsindex) && continue
+                    c_o = center(testT, Ochild)
+                    a_o = halfsize(testT, Ochild)
                     for Svert in treeS[1]
-                        #inner = get(K, Svert, nothing)
-                        #col = inner === nothing ? nothing : get(inner, Overt, nothing)
-                        #col === nothing && continue
-                        col = K[Svert][Overt]
+                        srcindex = K[Svert][Overt]
+                        c_s = center(trialT, Svert)
+                        a_s = halfsize(trialT, Svert)
 
+                        n_otilde = estimate_rank_3d(
+                            k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3
+                        )
+                        q_ks, k_l, r_l = Compressor(
+                            farassembler, srcindex, obsindex, n_otilde, τ
+                        )
+                        R_temp3 = sparse_blockdiag(R_temp3, q_ks)   #SPARSITY: sparse_
+
+                        #getsubdict!(R, Svert)[Ochild] = q_ks
+                        getsubdict!(K, Svert)[Ochild] = k_l
+                        #getsubdict!(εrank, Svert)[Ochild] = r_l
+                        #=
+                        #getsubdict!(R, Svert)[Overt] = q_ks
+                        getsubdict!(K, Svert)[Overt] = k_l
+                        #getsubdict!(εrank, Svert)[Overt] = r_l
                         Z = zeros(ComplexF64, length(obsindex), length(col))
                         farassembler(Z, obsindex, col)
-
                         getsubdict!(R, Svert)[Ochild] = Z
                         getsubdict!(K, Svert)[Ochild] = col
+                        =#
                     end
+                    push!(R_temp2, R_temp3)
+                    R_temp3 = Matrix{ComplexF64}(undef, 0, 0)
                 end
+                R_temp1 = sparse_blockdiag(R_temp1, sparse_vcat(R_temp2...))    #SPARSITY: sparse_
+                R_temp2 = Vector{AbstractMatrix{ComplexF64}}()
             end
+            push!(R, R_temp1)
 
         elseif !source_is_frozen && obs_is_frozen
+            R_temp1 = Matrix{ComplexF64}(undef, 0, 0)
             for Overt in treeO[LO]
                 obsindex = values(testT, Overt)
-                isempty(obsindex) && continue
+                #isempty(obsindex) && continue
+                R_temp2 = Matrix{ComplexF64}(undef, 0, 0)
+                c_o = center(testT, Overt)
+                a_o = halfsize(testT, Overt)
                 for Svert in treeS[LS - l]
                     #inner = get(U, Svert, nothing)
                     #srcindex = inner === nothing ? nothing : get(inner, Overt, nothing)
@@ -615,9 +618,7 @@ function subroutine_BF_approx_treeh2_mats(
                     srcindex = U[Svert][Overt]
 
                     c_s = center(trialT, Svert)
-                    c_o = center(testT, Overt)
                     a_s = halfsize(trialT, Svert)
-                    a_o = halfsize(testT, Overt)
 
                     n_otilde = estimate_rank_3d(
                         k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3
@@ -625,13 +626,14 @@ function subroutine_BF_approx_treeh2_mats(
                     q_ks, k_l, r_l = Compressor(
                         farassembler, srcindex, obsindex, n_otilde, τ
                     )
-
-                    getsubdict!(R, Svert)[Overt] = q_ks
+                    R_temp2 = sparse_blockdiag(R_temp2, q_ks)   #SPARSITY: sparse_
+                    #getsubdict!(R, Svert)[Overt] = q_ks
                     getsubdict!(K, Svert)[Overt] = k_l
                     #getsubdict!(εrank, Svert)[Overt] = r_l
                 end
+                R_temp1 = sparse_blockdiag(R_temp1, R_temp2)    #SPARSITY: sparse_
             end
-
+            push!(R, R_temp1)
         else
             break
         end
@@ -652,7 +654,7 @@ function subroutine_BF_approx_treeh2_mats(
         #isempty(row) && continue
         Z = zeros(ComplexF64, length(row), length(col))
         farassembler(Z, row, col)
-        P = sparse_blockdiag(P, Z)              #SPARSITY: blocksparse_ or sparse_
+        P = sparse_blockdiag(P, Z)              #SPARSITY: sparse_
         #P[Oleaf] = Z
         #push!(P, Z)
     end
