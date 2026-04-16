@@ -14,7 +14,9 @@ include("kernelmatrix/abstractkernelmatrix.jl")
 include("kernelmatrix/beastkernelmatrix.jl")
 
 include("nearinteractions.jl")
+include("ButterflyFactorization/Compressors.jl")
 include("ButterflyFactorization/subroutines.jl")
+include("ButterflyFactorization/auxillaries.jl")
 include("ButterflyFactorization/PetrovGalerkinBF.jl")
 
 end # module ButterflyFactorization

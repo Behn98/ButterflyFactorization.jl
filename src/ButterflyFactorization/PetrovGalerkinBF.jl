@@ -95,7 +95,8 @@ function PetrovGalerkinBF(
     testspace,
     trialspace,
     tree::BlockTree,
-    k::Float64,
+    k::Float64;
+    Compressor=ButterflyFactorization.PartialQR(),
     tol=1e-3,
     ntasks=Threads.nthreads(),
     α=2,
@@ -116,14 +117,17 @@ function PetrovGalerkinBF(
     fly = Vector{BF}()
     for (NO, source_nodes) in farints
         for NS in source_nodes
-            push!(fly, subroutine_BF_approx_treeh2(nearmatrix, tree, NO, NS, k, tol))
+            push!(
+                fly,
+                subroutine_BF_approx_treeh2(nearmatrix, tree, NO, NS, k, tol, Compressor),
+            )
             #end
         end
     end
 
     return PetrovGalerkinBF{eltype(operator)}(  #BEAST.scalartype(operator)
         nears,
-        #tree,
+        tree,
         farints,
         fly,        # Here come all other fields needed for the ButterflyFactorization
         size(nearmatrix),
@@ -208,36 +212,36 @@ end #mul should not return anything.... change to @views y
     fill!(y, zero(T))
     y += A.nearinteractions * x
     i = 1
-    for (NO, source_nodes) in A.farinteractions
-        for NS in source_nodes
-            y += applyBF_Mats(A.BFs[i], x)
-            i += 1
-        end
+    for i in eachindex(A.BFs)
+        y += applyBF_Mats(A.BFs[i], x)
     end
-
     return y
 end
 
 @views function LinearAlgebra.mul!(
     y::AbstractVecOrMat,
-    At::LinearMaps.TransposeMap{<:Any,<:ButterflyFactorization.PetrovGalerkinBF{T}},
+    At::LinearMaps.TransposeMap{<:Any,<:ButterflyFactorization.PetrovGalerkinBF_mats{T}},
     x::AbstractVector,
 ) where {T}
     LinearMaps.check_dim_mul(y, At.lmap, x)
     fill!(y, zero(T))
     y += transpose(At.lmap.nearinteractions) * x
-
+    for i in eachindex(At.BFs)
+        y += applyBF_Mats(transpose(At), v)
+    end
     return y
 end
 
 @views function LinearAlgebra.mul!(
     y::AbstractVecOrMat,
-    At::LinearMaps.AdjointMap{<:Any,<:ButterflyFactorization.PetrovGalerkinBF{T}},
+    At::LinearMaps.AdjointMap{<:Any,<:ButterflyFactorization.PetrovGalerkinBF_mats{T}},
     x::AbstractVector,
 ) where {T}
     LinearMaps.check_dim_mul(y, At.lmap, x)
     fill!(y, zero(T))
     y += adjoint(At.lmap.nearinteractions) * x
-
+    for i in eachindex(At.BFs)
+        y += applyBF_Mats(At', v)
+    end
     return y
 end
