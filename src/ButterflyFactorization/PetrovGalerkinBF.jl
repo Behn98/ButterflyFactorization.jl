@@ -49,8 +49,8 @@ function PetrovGalerkinBF_mats(
     testspace,
     trialspace,
     tree::BlockTree,
-    k::Float64,
-    Compressor::Abstractcompressor;
+    k::Float64;
+    Compressor=ButterflyFactorization.PartialQR(),
     tol=1e-3,
     ntasks=Threads.nthreads(),
     α=2,
@@ -74,7 +74,7 @@ function PetrovGalerkinBF_mats(
             push!(
                 fly,
                 subroutine_BF_approx_treeh2_mats(
-                    nearmatrix, tree, NO, NS, k, tol, Compressor
+                    nearmatrix, tree, NO, NS, k, tol; Compressor=Compressor
                 ),
             )
             #end
@@ -119,7 +119,9 @@ function PetrovGalerkinBF(
         for NS in source_nodes
             push!(
                 fly,
-                subroutine_BF_approx_treeh2(nearmatrix, tree, NO, NS, k, tol, Compressor),
+                subroutine_BF_approx_treeh2(
+                    nearmatrix, tree, NO, NS, k, tol; Compressor=Compressor
+                ),
             )
             #end
         end
@@ -188,7 +190,7 @@ end
 
 @views function LinearAlgebra.mul!(
     y::AbstractVecOrMat, A::ButterflyFactorization.PetrovGalerkinBF, x::AbstractVector{T}
-) where {T}     #PetrovGalerkinBF(T) instead of x::AbstractVector{T}?
+) where {T}
     LinearMaps.check_dim_mul(y, A, x)
     fill!(y, zero(T))
     y += A.nearinteractions * x
@@ -201,13 +203,13 @@ end
     end
 
     return y
-end #mul should not return anything.... change to @views y
+end
 
 @views function LinearAlgebra.mul!(
     y::AbstractVecOrMat,
     A::ButterflyFactorization.PetrovGalerkinBF_mats,
     x::AbstractVector{T},
-) where {T}     #PetrovGalerkinBF(T) instead of x::AbstractVector{T}?
+) where {T}
     LinearMaps.check_dim_mul(y, A, x)
     fill!(y, zero(T))
     y += A.nearinteractions * x
@@ -220,28 +222,56 @@ end
 
 @views function LinearAlgebra.mul!(
     y::AbstractVecOrMat,
-    At::LinearMaps.TransposeMap{<:Any,<:ButterflyFactorization.PetrovGalerkinBF_mats{T}},
-    x::AbstractVector,
+    At::LinearMaps.TransposeMap{<:Any,<:ButterflyFactorization.PetrovGalerkinBF_mats},
+    x::AbstractVector{T},
 ) where {T}
     LinearMaps.check_dim_mul(y, At.lmap, x)
     fill!(y, zero(T))
     y += transpose(At.lmap.nearinteractions) * x
-    for i in eachindex(At.BFs)
-        y += applyBF_Mats(transpose(At), v)
+    for i in eachindex(At.lmap.BFs)
+        y += applyBF_Mats(transpose(At.lmap.BFs[i]), x)
     end
     return y
 end
 
 @views function LinearAlgebra.mul!(
     y::AbstractVecOrMat,
-    At::LinearMaps.AdjointMap{<:Any,<:ButterflyFactorization.PetrovGalerkinBF_mats{T}},
-    x::AbstractVector,
+    At::LinearMaps.AdjointMap{<:Any,<:ButterflyFactorization.PetrovGalerkinBF_mats},
+    x::AbstractVector{T},
 ) where {T}
     LinearMaps.check_dim_mul(y, At.lmap, x)
     fill!(y, zero(T))
     y += adjoint(At.lmap.nearinteractions) * x
-    for i in eachindex(At.BFs)
-        y += applyBF_Mats(At', v)
+    for i in eachindex(At.lmap.BFs)
+        y += applyBF_Mats(At.lmap.BFs[i]', x)
+    end
+    return y
+end
+
+@views function LinearAlgebra.mul!(
+    y::AbstractVecOrMat,
+    At::LinearMaps.TransposeMap{<:Any,<:ButterflyFactorization.PetrovGalerkinBF},
+    x::AbstractVector{T},
+) where {T}
+    LinearMaps.check_dim_mul(y, At.lmap, x)
+    fill!(y, zero(T))
+    y += transpose(At.lmap.nearinteractions) * x
+    for i in eachindex(At.lmap.BFs)
+        y += apply_butterflyh2_transpose(At.lmap.tree, At.lmap.BFs[i], x)
+    end
+    return y
+end
+
+@views function LinearAlgebra.mul!(
+    y::AbstractVecOrMat,
+    At::LinearMaps.AdjointMap{<:Any,<:ButterflyFactorization.PetrovGalerkinBF},
+    x::AbstractVector{T},
+) where {T}
+    LinearMaps.check_dim_mul(y, At.lmap, x)
+    fill!(y, zero(T))
+    y += adjoint(At.lmap.nearinteractions) * x
+    for i in eachindex(At.lmap.BFs)
+        y += apply_butterflyh2_adjoint(At.lmap.tree, At.lmap.BFs[i], x)
     end
     return y
 end

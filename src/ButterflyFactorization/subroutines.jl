@@ -34,8 +34,8 @@ function subroutine_BF_approx_treeh2(
     NO::Int,
     NS::Int,
     k::Float64,
-    τ::Float64,
-    Compressor::ButterflyFactorization.Abstractcompressor,
+    τ::Float64;
+    Compressor=ButterflyFactorization.PartialQR(),
 )
 
     # --- containers ---
@@ -215,8 +215,8 @@ function subroutine_BF_approx_treeh2_mats(
     NO::Int,
     NS::Int,
     k::Float64,
-    τ::Float64,
-    Compressor::ButterflyFactorization.Abstractcompressor,
+    τ::Float64;
+    Compressor=ButterflyFactorization.PartialQR(),
 )
 
     # --- containers ---

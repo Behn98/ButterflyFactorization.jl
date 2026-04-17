@@ -362,7 +362,7 @@ function apply_butterflyh2_transpose(H2Blocktree, Butterfly::BF, v::Vector{Compl
                     # 2. THEN split the fully assembled sum to Schild
                     offset = 0
                     for Schild in children(trialT, Svert)
-                        if l < LS - 1 && l < LO - 1
+                        if l < LS - 1 #&& l < LO - 1
                             getsubdict!(coefficients, Schild)[Overt] = coeff_S[Overt][(offset + 1):(offset + size(
                                 R[Schild][Overt]
                             )[1])]
@@ -378,45 +378,48 @@ function apply_butterflyh2_transpose(H2Blocktree, Butterfly::BF, v::Vector{Compl
             end
 
         elseif source_is_frozen && !obs_is_frozen
-            for Svert in treeS[1]
-                coeff_S = getsubdict!(coefficients, Svert)
+            for Overt in treeO[LO - l]
+                for Svert in treeS[1]
+                    coeff_S = getsubdict!(coefficients, Svert)
 
-                for Overt in treeO[LS]
-                    coeff_SO = coeff_S[Overt]
-
-                    for Ochild in h2treelevels(testT, Overt)[l - LS + 2]
-                        R_check = R[Svert][Ochild]
-                        coeff_S[Ochild] = Vector{ComplexF64}(undef, size(R_check)[1])
-                        @views mul!(coeff_S[Ochild], R_check, coeff_SO)
+                    # 1. Sum up all projections from Ochild FIRST
+                    first_child = true
+                    for Ochild in children(testT, Overt)
+                        contrib = transpose(R[Svert][Ochild]) * coeff_S[Ochild]
+                        if first_child
+                            coeff_S[Overt] = contrib
+                            first_child = false
+                        else
+                            coeff_S[Overt] .+= contrib
+                        end
                     end
                 end
             end
 
         elseif !source_is_frozen && obs_is_frozen
-            for Svert in treeS[LS - l]
-                coeff_S = getsubdict!(coefficients, Svert)
+            for Overt in treeO[LO]
+                for Svert in treeS[l]
+                    coeff_S = getsubdict!(coefficients, Svert)
+                    contrib = transpose(R[Svert][Overt]) * coeff_S[Overt]
+                    coeff_S[Overt] = contrib
 
-                # ---- upward aggregation ----
-                for Overt in treeO[LO]
-                    temp = ComplexF64[]
-
+                    # 2. THEN split the fully assembled sum to Schild
+                    offset = 0
                     for Schild in children(trialT, Svert)
-                        coeffs_child = coefficients[Schild][Overt]
-                        append!(temp, coeffs_child)
+                        if l < LS - 1 #&& l < LO - 1
+                            getsubdict!(coefficients, Schild)[Overt] = coeff_S[Overt][(offset + 1):(offset + size(
+                                R[Schild][Overt]
+                            )[1])]
+                            offset += size(R[Schild][Overt])[1]
+                        else
+                            getsubdict!(coefficients, Schild)[Overt] = coeff_S[Overt][(offset + 1):(offset + size(
+                                Q[Schild]
+                            )[1])]
+                            offset += size(Q[Schild])[1]
+                        end
                     end
-
-                    coeff_S[Overt] = temp
-                end
-
-                # ---- frozen observer projection ----
-                for Overt in treeO[LO]
-                    R_check = R[Svert][Overt]
-                    temp = coeff_S[Overt]
-                    coeff_S[Overt] = Vector{ComplexF64}(undef, size(R_check)[1])
-                    @views mul!(coeff_S[Overt], R_check, temp)
                 end
             end
-
         else
             break
         end
@@ -427,19 +430,11 @@ function apply_butterflyh2_transpose(H2Blocktree, Butterfly::BF, v::Vector{Compl
     # ------------------------------------------------------------
     rootvals = values(trialT, H2Trees.root(trialT))
     result = zeros(ComplexF64, length(rootvals))
-    if LS >= LO
-        for Sleaf in treeS[LS]
-            inds = values(trialT, Sleaf)
-            dest = @view result[inds]
-            mul!(dest, transpose(Q[Sleaf]), coefficients[Sleaf][NO])
-        end
-    else
-        for Oleaf in treeO[LO]
-            inds = values(testT, Oleaf)
-            result[inds] = coefficients[NS][Oleaf]
-        end
+    for Sleaf in treeS[LS]
+        inds = values(trialT, Sleaf)
+        dest = @view result[inds]
+        mul!(dest, transpose(Q[Sleaf]), coefficients[Sleaf][NO])
     end
-
     return result
 end
 
@@ -467,12 +462,11 @@ function apply_butterflyh2_adjoint(H2Blocktree, Butterfly::BF, v::Vector{Complex
 
     LS = length(treeS)
     LO = length(treeO)
-    L = LS + LO
-
+    L = max(LS, LO)
     coefficients = Dict{Int,Dict{Int,Vector{ComplexF64}}}()
 
-    source_is_frozen = false
-    obs_is_frozen = false
+    source_is_frozen = true
+    obs_is_frozen = true
 
     # ------------------------------------------------------------
     # Leaf initialization
@@ -482,17 +476,22 @@ function apply_butterflyh2_adjoint(H2Blocktree, Butterfly::BF, v::Vector{Complex
         getsubdict!(coefficients, NS)[Oleaf] = Vector{ComplexF64}(undef, size(P[Oleaf])[2])
         @views mul!(getsubdict!(coefficients, NS)[Oleaf], adjoint(P[Oleaf]), v[obsvals])
     end
-
+    frozenoffsetS = 0
+    frozenoffsetO = 0
+    if LS > LO
+        frozenoffsetO = LS - LO
+    elseif LO > LS
+        frozenoffsetS = LO - LS
+    end
     # ------------------------------------------------------------
     # Level traversal
     # ------------------------------------------------------------
     for l in 1:(L - 1)
-        l >= LS && (source_is_frozen = true)
-        l >= LO && (obs_is_frozen = true)
-
+        l > (LO - LS) && (source_is_frozen = false)
+        l > (LS - LO) && (obs_is_frozen = false)
         if !source_is_frozen && !obs_is_frozen
-            for Overt in treeO[LO - l]
-                for Svert in treeS[l]
+            for Overt in treeO[LO - l + frozenoffsetO]
+                for Svert in treeS[l - frozenoffsetS]
                     coeff_S = getsubdict!(coefficients, Svert)
 
                     # 1. Sum up all projections from Ochild FIRST
@@ -510,7 +509,7 @@ function apply_butterflyh2_adjoint(H2Blocktree, Butterfly::BF, v::Vector{Complex
                     # 2. THEN split the fully assembled sum to Schild
                     offset = 0
                     for Schild in children(trialT, Svert)
-                        if l < LS - 1 && l < LO - 1
+                        if l - frozenoffsetS < LS - 1 #&& l - frozenoffsetO < LO - 1
                             getsubdict!(coefficients, Schild)[Overt] = coeff_S[Overt][(offset + 1):(offset + size(
                                 R[Schild][Overt]
                             )[1])]
@@ -526,45 +525,48 @@ function apply_butterflyh2_adjoint(H2Blocktree, Butterfly::BF, v::Vector{Complex
             end
 
         elseif source_is_frozen && !obs_is_frozen
-            for Svert in treeS[1]
-                coeff_S = getsubdict!(coefficients, Svert)
+            for Overt in treeO[LO - l]
+                for Svert in treeS[1]
+                    coeff_S = getsubdict!(coefficients, Svert)
 
-                for Overt in treeO[LS]
-                    coeff_SO = coeff_S[Overt]
-
-                    for Ochild in h2treelevels(testT, Overt)[l - LS + 2]
-                        R_check = R[Svert][Ochild]
-                        coeff_S[Ochild] = Vector{ComplexF64}(undef, size(R_check)[1])
-                        @views mul!(coeff_S[Ochild], R_check, coeff_SO)
+                    # 1. Sum up all projections from Ochild FIRST
+                    first_child = true
+                    for Ochild in children(testT, Overt)
+                        contrib = adjoint(R[Svert][Ochild]) * coeff_S[Ochild]
+                        if first_child
+                            coeff_S[Overt] = contrib
+                            first_child = false
+                        else
+                            coeff_S[Overt] .+= contrib
+                        end
                     end
                 end
             end
 
         elseif !source_is_frozen && obs_is_frozen
-            for Svert in treeS[LS - l]
-                coeff_S = getsubdict!(coefficients, Svert)
+            for Overt in treeO[LO]
+                for Svert in treeS[l]
+                    coeff_S = getsubdict!(coefficients, Svert)
+                    contrib = adjoint(R[Svert][Overt]) * coeff_S[Overt]
+                    coeff_S[Overt] = contrib
 
-                # ---- upward aggregation ----
-                for Overt in treeO[LO]
-                    temp = ComplexF64[]
-
+                    # 2. THEN split the fully assembled sum to Schild
+                    offset = 0
                     for Schild in children(trialT, Svert)
-                        coeffs_child = coefficients[Schild][Overt]
-                        append!(temp, coeffs_child)
+                        if l < LS - 1
+                            getsubdict!(coefficients, Schild)[Overt] = coeff_S[Overt][(offset + 1):(offset + size(
+                                R[Schild][Overt]
+                            )[1])]
+                            offset += size(R[Schild][Overt])[1]
+                        else
+                            getsubdict!(coefficients, Schild)[Overt] = coeff_S[Overt][(offset + 1):(offset + size(
+                                Q[Schild]
+                            )[1])]
+                            offset += size(Q[Schild])[1]
+                        end
                     end
-
-                    coeff_S[Overt] = temp
-                end
-
-                # ---- frozen observer projection ----
-                for Overt in treeO[LO]
-                    R_check = R[Svert][Overt]
-                    temp = coeff_S[Overt]
-                    coeff_S[Overt] = Vector{ComplexF64}(undef, size(R_check)[1])
-                    @views mul!(coeff_S[Overt], R_check, temp)
                 end
             end
-
         else
             break
         end
@@ -575,19 +577,11 @@ function apply_butterflyh2_adjoint(H2Blocktree, Butterfly::BF, v::Vector{Complex
     # ------------------------------------------------------------
     rootvals = values(trialT, H2Trees.root(trialT))
     result = zeros(ComplexF64, length(rootvals))
-    if LS >= LO
-        for Sleaf in treeS[LS]
-            inds = values(trialT, Sleaf)
-            dest = @view result[inds]
-            mul!(dest, adjoint(Q[Sleaf]), coefficients[Sleaf][NO])
-        end
-    else
-        for Oleaf in treeO[LO]
-            inds = values(testT, Oleaf)
-            result[inds] = coefficients[NS][Oleaf]
-        end
+    for Sleaf in treeS[LS]
+        inds = values(trialT, Sleaf)
+        dest = @view result[inds]
+        mul!(dest, adjoint(Q[Sleaf]), coefficients[Sleaf][NO])
     end
-
     return result
 end
 
