@@ -608,6 +608,8 @@ function h2treelevels(tree::H2Trees.TwoNTree, root::Int64)
     return levels
 end
 
+permute(space, perm) = permute!(copy(space), perm)
+
 abstract type SpaceOrderingStyle end
 struct PermuteSpaceInPlace <: SpaceOrderingStyle end
 function (::PermuteSpaceInPlace)(tree, testspace, trialspace)
