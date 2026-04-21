@@ -98,6 +98,56 @@ function blocksparse_vcat(blocks...)
     )
 end
 
+function Base.adjoint(B::BF)
+    R_adj = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
+
+    for nodeS in keys(B.R)
+        for nodeO in keys(B.R[nodeS])
+            if !haskey(R_adj, nodeO)
+                R_adj[nodeO] = Dict{Int,Matrix{ComplexF64}}()
+            end
+            R_adj[nodeO][nodeS] = adjoint(B.R[nodeS][nodeO])
+        end
+    end
+
+    Q_adj = Dict{Int,Matrix{ComplexF64}}()
+    for k in keys(B.Q)
+        Q_adj[k] = adjoint(B.Q[k])
+    end
+
+    P_adj = Dict{Int,Matrix{ComplexF64}}()
+    for k in keys(B.P)
+        P_adj[k] = adjoint(B.P[k])
+    end
+
+    return BF(P_adj, R_adj, Q_adj, B.NO, B.NS, B.k, B.τ)
+end
+
+function Base.transpose(B::BF)
+    R_tr = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
+
+    for nodeS in keys(B.R)
+        for nodeO in keys(B.R[nodeS])
+            if !haskey(R_adj, nodeO)
+                R_tr[nodeO] = Dict{Int,Matrix{ComplexF64}}()
+            end
+            R_tr[nodeO][nodeS] = transpose(B.R[nodeS][nodeO])
+        end
+    end
+
+    Q_tr = Dict{Int,Matrix{ComplexF64}}()
+    for k in keys(B.Q)
+        Q_tr[k] = transpose(B.Q[k])
+    end
+
+    P_tr = Dict{Int,Matrix{ComplexF64}}()
+    for k in keys(B.P)
+        P_tr[k] = transpose(B.P[k])
+    end
+
+    return BF(P_tr, R_tr, Q_tr, B.NO, B.NS, B.k, B.τ)
+end
+
 function Base.adjoint(t::BF_Mats)
     return BF_Mats(
         t.P',                                                      # Q becomes P'
