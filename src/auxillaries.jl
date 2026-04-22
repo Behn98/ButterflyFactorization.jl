@@ -682,3 +682,15 @@ struct PreserveSpaceOrder <: SpaceOrderingStyle end
 function (::PreserveSpaceOrder)(tree, testspace, trialspace)
     return nothing
 end
+#=
+function AdaptiveCrossApproximation.permutation(tree::H2Trees.H2ClusterTree)
+    perm = zeros(Int, H2Trees.numberofvalues(tree))
+    n = 1
+    for leaf in H2Trees.leaves(tree)
+        perm[n:(n + length(H2Trees.values(tree, leaf)) - 1)] = H2Trees.values(tree, leaf)
+        tree.nodes[leaf].data.values .= n:(n + length(H2Trees.values(tree, leaf)) - 1)
+        n += length(H2Trees.values(tree, leaf))
+    end
+    return perm
+end
+=#
