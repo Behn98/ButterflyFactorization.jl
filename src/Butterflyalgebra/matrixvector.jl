@@ -1,4 +1,3 @@
-
 @views function LinearAlgebra.mul!(
     y::AbstractVecOrMat, A::ButterflyFactorization.PetrovGalerkinBF, x::AbstractVector{T}
 ) where {T}

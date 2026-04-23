@@ -6,7 +6,8 @@ struct BF
     NO::Int64
     k::Float64
     τ::Float64
-    BF(Q, R, P, NS, NO, k, τ) = new(Q, R, P, NS, NO, k, τ)
+    sym::Bool
+    BF(Q, R, P, NS, NO, k, τ, sym) = new(Q, R, P, NS, NO, k, τ, sym)
 end
 
 struct BF_Mats
@@ -205,7 +206,7 @@ function subroutine_BF_approx_treeh2(
 
         P[Oleaf] = Z
     end
-    result = BF(Q, R, P, NS, NO, τ, k)
+    result = BF(Q, R, P, NS, NO, k, τ, false)
     return result
 end
 
