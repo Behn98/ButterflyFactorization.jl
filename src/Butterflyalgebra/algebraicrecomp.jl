@@ -85,24 +85,19 @@ function update_next_level_R_right!(R, Q, R_u, l, H2Blocktree, NS, NO)
 
     LS = length(treeS)
     LO = length(treeO)
-    L = LS + LO
+
     if l < LS - 1
         for nodeS in treeS[l + 1]
             for nodeO in treeO[LO - l]
                 for Schild in children(trialT, nodeS)
-                    for Ochild in treeO[LO - l +2]
-                        R[Schild][Ochild] = R_u[nodeS][nodeO] * R[Schild][Ochild]
-                        #@views mul!(R[nodeS][Ochild], R_u[nodeS][nodeO], R[nodeS][Ochild])
-                    end
+                    R[Schild][nodeO] = R_u[nodeS][nodeO] * R[Schild][nodeO]
+                    #@views mul!(R[nodeS][Ochild], R_u[nodeS][nodeO], R[nodeS][Ochild])
                 end
             end
         end
     else
-        counter = 1
         for nodeS in treeS[LS]
-            #Q[nodeS] = R_u[nodeS][NO] * Q[nodeS]
-            @views mul!(Q[nodeS], R_u[nodeS][NO], Q[nodeS])
-            counter += 1
+            Q[nodeS] = R_u[nodeS][NO] * Q[nodeS]
         end
     end
 end
