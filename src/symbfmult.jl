@@ -46,6 +46,7 @@ function (Butterfly::BF)(v::Vector{ComplexF64}, H2Blocktree)
                 for Overt in treeO[l]
                     for Ochild in children(testT, Overt)
                         coeff_S[Ochild] = Vector{ComplexF64}(undef, 0)
+                        first = true
                         for Schild in children(trialT, Svert)
                             coeff_temp = Vector{ComplexF64}(
                                 undef, size(R[Schild][Ochild])[1]
@@ -53,7 +54,13 @@ function (Butterfly::BF)(v::Vector{ComplexF64}, H2Blocktree)
                             @views mul!(
                                 coeff_temp, R[Schild][Ochild], coefficients[Schild][Overt]
                             )
-                            coeff_S[Ochild] = vcat(coeff_S[Ochild], coeff_temp)
+
+                            if first
+                                coeff_S[Ochild] = coeff_temp
+                                first = false
+                            else
+                                coeff_S[Ochild] += coeff_temp
+                            end
                         end
                     end
                 end
@@ -63,11 +70,10 @@ function (Butterfly::BF)(v::Vector{ComplexF64}, H2Blocktree)
             for Svert in treeS[1]
                 coeff_S = getsubdict!(coefficients, Svert)
 
-                for Overt in treeO[LS]
-                    coeff_SO = coeff_S[Overt]
-
-                    for Ochild in h2treelevels(testT, Overt)[l - LS + 2]
+                for Overt in treeO[l]
+                    for Ochild in children(Overt, testT)
                         coeff_S[Ochild] = Vector{ComplexF64}(undef, 0)
+                        first = true
                         for Schild in children(trialT, Svert)
                             coeff_temp = Vector{ComplexF64}(
                                 undef, size(R[Schild][Ochild])[1]
@@ -75,7 +81,13 @@ function (Butterfly::BF)(v::Vector{ComplexF64}, H2Blocktree)
                             @views mul!(
                                 coeff_temp, R[Schild][Ochild], coefficients[Schild][Overt]
                             )
-                            coeff_S[Ochild] = vcat(coeff_S[Ochild], coeff_temp)
+
+                            if first
+                                coeff_S[Ochild] = coeff_temp
+                                first = false
+                            else
+                                coeff_S[Ochild] += coeff_temp
+                            end
                         end
                     end
                 end
@@ -88,12 +100,19 @@ function (Butterfly::BF)(v::Vector{ComplexF64}, H2Blocktree)
                 # ---- frozen observer projection ----
                 for Overt in treeO[LO]
                     coeff_S[Overt] = Vector{ComplexF64}(undef, 0)
+                    first = true
                     for Schild in children(trialT, Svert)
-                        coeff_temp = Vector{ComplexF64}(undef, size(R[Schild][Ochild])[1])
+                        coeff_temp = Vector{ComplexF64}(undef, size(R[Schild][Overt])[1])
                         @views mul!(
-                            coeff_temp, R[Schild][Ochild], coefficients[Schild][Overt]
+                            coeff_temp, R[Schild][Overt], coefficients[Schild][Overt]
                         )
-                        coeff_S[Overt] = vcat(coeff_S[Overt], coeff_temp)
+
+                        if first
+                            coeff_S[Overt] = coeff_temp
+                            first = false
+                        else
+                            coeff_S[Overt] += coeff_temp
+                        end
                     end
                 end
             end

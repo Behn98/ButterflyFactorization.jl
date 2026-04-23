@@ -35,41 +35,30 @@ function recompress_BF_right(Butterfly::BF, H2Blocktree)
         elseif !source_is_frozen && !obs_is_frozen
             for nodeS in treeS[l]
                 for nodeO in treeO[LO - l]
-                    R_k = Vector{Matrix{ComplexF64}}()
-                    row_spc = Vector{Int}()
-                    i = 1
-                    for Ochild in children(testT, nodeO)
-                        push!(R_k, R[nodeS][Ochild])
-                        push!(row_spc, size(R_k[i], 1))
-                        i += 1
-                    end
-
-                    A = vcat(R_k...)
-                    Q_new = Matrix{ComplexF64}(undef, size(A, 1), 0)
-
-                    last = 0
-
+                    first = true
                     for Schild in children(trialT, nodeS)
-                        if l < LS - 1
-                            col_spc = size(R[Schild][nodeO], 1)
-                        else
-                            col_spc = size(Q[Schild], 1)
+                        R_k = Vector{Matrix{ComplexF64}}()
+                        row_spc = Vector{Int}()
+                        i = 1
+                        for Ochild in children(testT, nodeO)
+                            push!(R_k, R[Schild][Ochild])
+                            push!(row_spc, size(R_k[i], 1))
+
+                            i += 1
                         end
-                        QRA = pqr(A[:, (last + 1):(last + col_spc)]; rtol=τ)
-                        Q_new = hcat(Q_new, QRA[1])
+                        A_k = vcat(R_k...)
+                        QRA = pqr(A_k; rtol=τ)
                         if !haskey(R_u, Schild)
                             R_u[Schild] = Dict{Int,Matrix{ComplexF64}}()
                         end
                         R_u[Schild][nodeO] = QRA[2][:, invperm(QRA[3])]
-                        last += col_spc
-                    end
-
-                    last = 0
-                    j = 1
-                    for Ochild in children(testT, nodeO)
-                        R[nodeS][Ochild] = Q_new[(last + 1):(last + row_spc[j]), :]
-                        last += row_spc[j]
-                        j += 1
+                        last = 0
+                        j = 1
+                        for Ochild in children(testT, nodeO)
+                            R[Schild][Ochild] = QRA[1][(last + 1):(last + row_spc[j]), :]
+                            last += row_spc[j]
+                            j += 1
+                        end
                     end
                 end
             end
@@ -79,6 +68,54 @@ function recompress_BF_right(Butterfly::BF, H2Blocktree)
     end
 
     return BF(Q, R, P, NS, NO, k, τ, Butterfly.sym)
+end
+
+function update_next_level_R_right!(R, Q, R_u, l, H2Blocktree, NS, NO)
+    # --- trees & helpers ---
+    trialT = H2Trees.trialtree(H2Blocktree)
+    testT = H2Trees.testtree(H2Blocktree)
+
+    values = H2Trees.values
+    center = H2Trees.center
+    halfsize = H2Trees.halfsize
+    children = H2Trees.children
+
+    treeS = h2treelevels(trialT, NS)
+    treeO = h2treelevels(testT, NO)
+
+    LS = length(treeS)
+    LO = length(treeO)
+    L = LS + LO
+    if l < LS - 1
+        for nodeS in treeS[l + 1]
+            for nodeO in treeO[LO - l]
+                for Schild in children(trialT, nodeS)
+                    for Ochild in treeO[LO - l +2]
+                        R[Schild][Ochild] = R_u[nodeS][nodeO] * R[Schild][Ochild]
+                        #@views mul!(R[nodeS][Ochild], R_u[nodeS][nodeO], R[nodeS][Ochild])
+                    end
+                end
+            end
+        end
+    else
+        counter = 1
+        for nodeS in treeS[LS]
+            #Q[nodeS] = R_u[nodeS][NO] * Q[nodeS]
+            @views mul!(Q[nodeS], R_u[nodeS][NO], Q[nodeS])
+            counter += 1
+        end
+    end
+end
+
+function recompress_symBF_left(Butterfly::BF, H2Blocktree)
+    return recompress_BF_right(
+        Butterfly',
+        H2Trees.BlockTree(H2Trees.trialtree(H2Blocktree), H2Trees.testtree(H2Blocktree)),
+    )'
+end
+
+function recompress_symBF(Butterfly::BF, H2Blocktree)
+    return recompress_symBF_left(recompress_BF_right(Butterfly, H2Blocktree), H2Blocktree)
 end
 
 function recompress_BF_left(Butterfly::BF, H2Blocktree)
@@ -159,38 +196,7 @@ function recompress_BF_left(Butterfly::BF, H2Blocktree)
         end
     end
 
-    return BF(Q, R, P, NS, NO, k, τ)
-end
-
-function update_next_level_R_right!(R, Q, R_u, l, H2Blocktree, NS, NO)
-    # --- trees & helpers ---
-    trialT = H2Trees.trialtree(H2Blocktree)
-    testT = H2Trees.testtree(H2Blocktree)
-
-    values = H2Trees.values
-    center = H2Trees.center
-    halfsize = H2Trees.halfsize
-    children = H2Trees.children
-
-    treeS = h2treelevels(trialT, NS)
-    treeO = h2treelevels(testT, NO)
-
-    LS = length(treeS)
-    LO = length(treeO)
-    L = LS + LO
-    if l < LS - 1
-        for nodeS in treeS[l + 1]
-            for nodeO in treeO[LO - l]
-                R[nodeS][nodeO] = R_u[nodeS][nodeO] * R[nodeS][nodeO]
-            end
-        end
-    else
-        counter = 1
-        for nodeS in treeS[LS]          #future: leaves(trialT)
-            Q[nodeS] = R_u[nodeS][NO] * Q[nodeS]
-            counter += 1
-        end
-    end
+    return BF(Q, R, P, NS, NO, k, τ, BF.sym)
 end
 
 function update_next_level_R_left!(R, P, R_u, l, H2Blocktree, NS, NO)
