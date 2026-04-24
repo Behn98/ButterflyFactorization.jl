@@ -128,7 +128,7 @@ function Base.transpose(B::BF)
 
     for nodeS in keys(B.R)
         for nodeO in keys(B.R[nodeS])
-            if !haskey(R_adj, nodeO)
+            if !haskey(R_tr, nodeO)
                 R_tr[nodeO] = Dict{Int,Matrix{ComplexF64}}()
             end
             R_tr[nodeO][nodeS] = transpose(B.R[nodeS][nodeO])

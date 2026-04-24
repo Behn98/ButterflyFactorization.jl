@@ -1,7 +1,7 @@
 struct BF
-    Q::Dict{Int,Matrix{ComplexF64}}
-    R::Dict{Int,Dict{Int,Matrix{ComplexF64}}}
-    P::Dict{Int,Matrix{ComplexF64}}
+    Q::Dict{Int,AbstractMatrix{ComplexF64}}
+    R::Dict{Int,Dict{Int,AbstractMatrix{ComplexF64}}}
+    P::Dict{Int,AbstractMatrix{ComplexF64}}
     NS::Int64
     NO::Int64
     k::Float64
