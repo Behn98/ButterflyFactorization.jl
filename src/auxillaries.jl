@@ -148,6 +148,86 @@ function Base.transpose(B::BF)
     return BF(P_tr, R_tr, Q_tr, B.NO, B.NS, B.k, B.τ, B.sym)
 end
 
+function Base.adjoint(B::BF2)
+    R_adj = Dict{Int,Dict{Int,Dict{Int,Matrix{ComplexF64}}}}()
+
+    for l in keys(B.R)
+        newl = B.level - l
+        R_adj[newl] = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
+        for nodeS in keys(B.R[l])
+            for nodeO in keys(B.R[l][nodeS])
+                if !haskey(R_adj[newl], nodeO)
+                    R_adj[newl][nodeO] = Dict{Int,Matrix{ComplexF64}}()
+                end
+                R_adj[newl][nodeO][nodeS] = adjoint(B.R[l][nodeS][nodeO])
+            end
+        end
+    end
+
+    Q_adj = Dict{Int,Matrix{ComplexF64}}()
+    for k in keys(B.Q)
+        Q_adj[k] = adjoint(B.Q[k])
+    end
+
+    P_adj = Dict{Int,Matrix{ComplexF64}}()
+    for k in keys(B.P)
+        P_adj[k] = adjoint(B.P[k])
+    end
+
+    return BF2(
+        P_adj,
+        R_adj,
+        Q_adj,
+        H2Trees.BlockTree(H2Trees.trialtree(B.tree), H2Trees.testtree(B.tree)),
+        (B.dim[2], B.dim[1]),
+        B.level,
+        B.NO,
+        B.NS,
+        B.k,
+        B.τ,
+    )
+end
+
+function Base.transpose(B::BF2)
+    R_tr = Dict{Int,Dict{Int,Dict{Int,Matrix{ComplexF64}}}}()
+
+    for l in keys(B.R)
+        newl = B.level - l
+        R_tr[newl] = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
+        for nodeS in keys(B.R[l])
+            for nodeO in keys(B.R[l][nodeS])
+                if !haskey(R_tr[newl], nodeO)
+                    R_tr[newl][nodeO] = Dict{Int,Matrix{ComplexF64}}()
+                end
+                R_tr[newl][nodeO][nodeS] = transpose(B.R[l][nodeS][nodeO])
+            end
+        end
+    end
+
+    Q_tr = Dict{Int,Matrix{ComplexF64}}()
+    for k in keys(B.Q)
+        Q_tr[k] = transpose(B.Q[k])
+    end
+
+    P_tr = Dict{Int,Matrix{ComplexF64}}()
+    for k in keys(B.P)
+        P_tr[k] = transpose(B.P[k])
+    end
+
+    return BF2(
+        P_tr,
+        R_tr,
+        Q_tr,
+        H2Trees.BlockTree(H2Trees.trialtree(B.tree), H2Trees.testtree(B.tree)),
+        (B.dim[2], B.dim[1]),
+        B.level,
+        B.NO,
+        B.NS,
+        B.k,
+        B.τ,
+    )
+end
+
 function Base.adjoint(t::BF_Mats)
     return BF_Mats(
         t.P',                                                      # Q becomes P'
@@ -257,8 +337,8 @@ struct PreserveSpaceOrder <: SpaceOrderingStyle end
 function (::PreserveSpaceOrder)(tree, testspace, trialspace)
     return nothing
 end
-#=
-function AdaptiveCrossApproximation.permutation(tree::H2Trees.H2ClusterTree)
+
+function permutation(tree::H2Trees.H2ClusterTree)
     perm = zeros(Int, H2Trees.numberofvalues(tree))
     n = 1
     for leaf in H2Trees.leaves(tree)
@@ -268,4 +348,3 @@ function AdaptiveCrossApproximation.permutation(tree::H2Trees.H2ClusterTree)
     end
     return perm
 end
-=#

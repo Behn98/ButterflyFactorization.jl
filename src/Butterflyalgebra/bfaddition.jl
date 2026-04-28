@@ -10,35 +10,48 @@ this new struct is of pure algebraic interest and has lost its physical meaningf
 as much as it would ve if we were to add the two matrices behind them. Also be aware that im
 only tackling the symetric case of a BF.=#
 
-function add_eqbf(BF1::BF, BF2::BF, tree)
-    @assert BF1.NS == BF2.NS && BF1.NO == BF2.NO "rootids must match for addition."
+function add_eqbf(BF1::BF2, BF_2::BF2)
+    @assert BF1.NS == BF_2.NS && BF1.NO == BF_2.NO "rootids must match for addition."
     # --- Case 1: Same source and observer clusters ---
-    R_new = Dict{Int,Dict{Int,AbstractMatrix{ComplexF64}}}()
-
-    for nodeS in keys(BF1.R)
-        for nodeO in keys(BF1.R[nodeS])
-            if !haskey(R_new, nodeS)
-                R_new[nodeS] = Dict{Int,AbstractMatrix{ComplexF64}}()
+    R_new = Dict{Int,Dict{Int,Dict{Int,AbstractMatrix{ComplexF64}}}}()
+    for l in keys(BF1.R)
+        R_new[l] = Dict{Int,Dict{Int,AbstractMatrix{ComplexF64}}}()
+        for nodeS in keys(BF1.R[l])
+            for nodeO in keys(BF1.R[l][nodeS])
+                if !haskey(R_new[l], nodeS)
+                    R_new[l][nodeS] = Dict{Int,AbstractMatrix{ComplexF64}}()
+                end
+                R_new[l][nodeS][nodeO] = sparse_blockdiag(
+                    BF1.R[l][nodeS][nodeO], BF_2.R[l][nodeS][nodeO]
+                )
             end
-            R_new[nodeS][nodeO] = sparse_blockdiag(BF1.R[nodeS][nodeO], BF2.R[nodeS][nodeO])
         end
     end
-
     Q_new = Dict{Int,AbstractMatrix{ComplexF64}}()
     for k in keys(BF1.Q)
-        Q_new[k] = vcat(BF1.Q[k], BF2.Q[k])
+        Q_new[k] = vcat(BF1.Q[k], BF_2.Q[k])
     end
 
     P_new = Dict{Int,AbstractMatrix{ComplexF64}}()
     for k in keys(BF1.P)
-        P_new[k] = hcat(BF1.P[k], BF2.P[k])
+        P_new[k] = hcat(BF1.P[k], BF_2.P[k])
     end
     return recompress_BF(
-        BF(Q_new, R_new, P_new, BF1.NS, BF1.NO, max(BF1.k, BF2.k), max(BF1.τ, BF2.τ), true),
-        tree,
+        BF2(
+            Q_new,
+            R_new,
+            P_new,
+            BF1.tree,
+            BF1.dim,
+            BF1.level,
+            BF1.NS,
+            BF1.NO,
+            BF1.k,
+            max(BF1.τ, BF_2.τ),
+        ),
     )
 end
 
-function add_neqbf(BF1::BF, BF2::BF)
-    return (BF1, BF2)
+function add_neqbf(BF1::BF, BF_2::BF)
+    return (BF1, BF_2)   #insert struct here if needed
 end

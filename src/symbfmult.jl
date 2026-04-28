@@ -1,10 +1,35 @@
-function (Butterfly::BF)(v::Vector{ComplexF64}, H2Blocktree)
+function Base.size(A::ButterflyFactorization.BF2, dim=nothing)
+    if dim === nothing
+        return (A.dim[1], A.dim[2])
+    elseif dim == 1
+        return A.dim[1]
+    elseif dim == 2
+        return A.dim[2]
+    else
+        error("dim must be either 1 or 2")
+    end
+end
+
+function Base.length(A::ButterflyFactorization.BF2)
+    return A.level + 1
+end
+
+@views function LinearAlgebra.mul!(
+    y::AbstractVecOrMat, Butterfly::BF2, x::AbstractVector{T}
+) where {T}
+    LinearMaps.check_dim_mul(y, Butterfly, x)
+    result = apply_BF2(Butterfly, x)
+    copyto!(y, result)
+    return nothing
+end
+
+function apply_BF2(Butterfly::BF2, v::Vector{ComplexF64})
     Q = Butterfly.Q
     R = Butterfly.R
     P = Butterfly.P
     NO = Butterfly.NO
     NS = Butterfly.NS
-
+    H2Blocktree = Butterfly.tree
     trialT = H2Trees.trialtree(H2Blocktree)
     testT = H2Trees.testtree(H2Blocktree)
 
@@ -49,10 +74,12 @@ function (Butterfly::BF)(v::Vector{ComplexF64}, H2Blocktree)
                         first = true
                         for Schild in children(trialT, Svert)
                             coeff_temp = Vector{ComplexF64}(
-                                undef, size(R[Schild][Ochild])[1]
+                                undef, size(R[l][Schild][Ochild])[1]
                             )
                             @views mul!(
-                                coeff_temp, R[Schild][Ochild], coefficients[Schild][Overt]
+                                coeff_temp,
+                                R[l][Schild][Ochild],
+                                coefficients[Schild][Overt],
                             )
 
                             if first
@@ -76,10 +103,12 @@ function (Butterfly::BF)(v::Vector{ComplexF64}, H2Blocktree)
                         first = true
                         for Schild in children(trialT, Svert)
                             coeff_temp = Vector{ComplexF64}(
-                                undef, size(R[Schild][Ochild])[1]
+                                undef, size(R[l][Schild][Ochild])[1]
                             )
                             @views mul!(
-                                coeff_temp, R[Schild][Ochild], coefficients[Schild][Overt]
+                                coeff_temp,
+                                R[l][Schild][Ochild],
+                                coefficients[Schild][Overt],
                             )
 
                             if first
@@ -104,7 +133,7 @@ function (Butterfly::BF)(v::Vector{ComplexF64}, H2Blocktree)
                     for Schild in children(trialT, Svert)
                         coeff_temp = Vector{ComplexF64}(undef, size(R[Schild][Overt])[1])
                         @views mul!(
-                            coeff_temp, R[Schild][Overt], coefficients[Schild][Overt]
+                            coeff_temp, R[l][Schild][Overt], coefficients[Schild][Overt]
                         )
 
                         if first
@@ -127,18 +156,10 @@ function (Butterfly::BF)(v::Vector{ComplexF64}, H2Blocktree)
     # ------------------------------------------------------------
     rootvals = values(testT, H2Trees.root(testT))
     result = zeros(ComplexF64, length(rootvals))
-    if LS >= LO
-        for Oleaf in treeO[LO]
-            inds = values(testT, Oleaf)
-            dest = @view result[inds]
-            mul!(dest, P[Oleaf], coefficients[NS][Oleaf])
-        end
-    else
-        for Oleaf in treeO[LO]
-            inds = values(testT, Oleaf)
-            result[inds] = coefficients[NS][Oleaf]
-        end
+    for Oleaf in treeO[LO]
+        inds = values(testT, Oleaf)
+        dest = @view result[inds]
+        mul!(dest, P[Oleaf], coefficients[NS][Oleaf])
     end
-
     return result
 end

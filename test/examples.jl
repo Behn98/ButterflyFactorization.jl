@@ -47,12 +47,3 @@ Base.summarysize(A2)
 relerr = norm(y_exact2 - y) / norm(y_exact2)
 norm(y)
 norm(y_exact2)
-
-#=
-To do liste:
-- use PetrovGalerkinBF --> farmatrix instead of farassembler
-- 50 0000 Basisfunctions
-- h = 0.1
-- λ = 10h --> push all onto the server and run there
-
-=#

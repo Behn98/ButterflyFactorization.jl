@@ -1,4 +1,3 @@
-
 function Base.size(A::ButterflyFactorization.PetrovGalerkinBF, dim=nothing)
     if dim === nothing
         return (A.dim[1], A.dim[2])

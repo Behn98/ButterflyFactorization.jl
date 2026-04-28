@@ -1,5 +1,19 @@
+struct BF2
+    Q::Dict{Int,AbstractMatrix{ComplexF64}}
+    R::Dict{Int,Dict{Int,Dict{Int,AbstractMatrix{ComplexF64}}}}
+    P::Dict{Int,AbstractMatrix{ComplexF64}}
+    tree::H2Trees.BlockTree
+    dim::Tuple{Int,Int}
+    level::Int
+    NS::Int64
+    NO::Int64
+    k::Float64
+    τ::Float64
+    BF2(Q, R, P, tree, dim, level, NS, NO, k, τ) =
+        new(Q, R, P, tree, dim, level, NS, NO, k, τ)
+end
 
-function subroutine_BF_sym(
+function subroutine_BF(
     farassembler,
     H2Blocktree,
     NO::Int,
@@ -12,7 +26,7 @@ function subroutine_BF_sym(
     # --- containers ---
     Q = Dict{Int,Matrix{ComplexF64}}()
 
-    R = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
+    R = Dict{Int,Dict{Int,Dict{Int,Matrix{ComplexF64}}}}()
     K = Dict{Int,Dict{Int,Vector{Int}}}()
     U = Dict{Int,Dict{Int,Vector{Int}}}()   #temporary unions
 
@@ -30,7 +44,7 @@ function subroutine_BF_sym(
 
     LS = length(treeS)
     LO = length(treeO)
-    L = LS + LO
+    L = max(LS, LO)
 
     # ------------------------------------------------------------------
     # Leaf-level Q
@@ -60,7 +74,11 @@ function subroutine_BF_sym(
     for l in 1:(L - 1)
         l >= LS && (source_is_frozen = true)
         l >= LO && (obs_is_frozen = true)
-
+        if source_is_frozen && obs_is_frozen
+            break
+        else
+            R[l] = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
+        end
         # --------------------------------------------------------------
         # Build U (union of child skeletons)
         # --------------------------------------------------------------
@@ -106,7 +124,9 @@ function subroutine_BF_sym(
                         last = 0
                         for Schild in children(trialT, Svert)
                             ks = length(getsubdict!(K, Schild)[Overt])
-                            getsubdict!(R, Schild)[Ochild] = q_ks[:, (last + 1):(last + ks)]
+                            getsubdict!(R[l], Schild)[Ochild] = q_ks[
+                                :, (last + 1):(last + ks)
+                            ]
                             last += ks
                         end
                         getsubdict!(K, Svert)[Ochild] = k_l
@@ -135,7 +155,9 @@ function subroutine_BF_sym(
                         last = 0
                         for Schild in children(trialT, Svert)
                             ks = length(getsubdict!(K, Schild)[Overt])
-                            getsubdict!(R, Schild)[Ochild] = q_ks[:, (last + 1):(last + ks)]
+                            getsubdict!(R[l], Schild)[Ochild] = q_ks[
+                                :, (last + 1):(last + ks)
+                            ]
                             last += ks
                         end
                         getsubdict!(K, Svert)[Ochild] = k_l
@@ -165,7 +187,7 @@ function subroutine_BF_sym(
                     last = 0
                     for Schild in children(trialT, Svert)
                         ks = length(getsubdict!(K, Schild)[Overt])
-                        getsubdict!(R, Schild)[Overt] = q_ks[:, (last + 1):(last + ks)]
+                        getsubdict!(R[l], Schild)[Overt] = q_ks[:, (last + 1):(last + ks)]
                         last += ks
                     end
                     getsubdict!(K, Svert)[Overt] = k_l
@@ -190,6 +212,16 @@ function subroutine_BF_sym(
 
         P[Oleaf] = Z
     end
-    result = BF(Q, R, P, NS, NO, k, τ, true)
-    return result
+    return BF2(
+        Q,
+        R,
+        P,
+        H2Blocktree,
+        (length(values(testT, NO)), length(values(trialT, NS))),
+        L,
+        NS,
+        NO,
+        k,
+        τ,
+    )
 end
