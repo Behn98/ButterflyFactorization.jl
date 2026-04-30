@@ -1,19 +1,19 @@
-function recompress_BF_left(Butterfly::BF2)
-    return recompress_BF_right(Butterfly')'
+function recompress_BF_left(Butterfly::BF2, τ)
+    return recompress_BF_right(Butterfly', τ)'
 end
 
-function recompress_BF(Butterfly::BF2)
-    return recompress_BF_left(recompress_BF_right(Butterfly))
+function recompress_BF(Butterfly::BF2, τ)
+    return recompress_BF_left(recompress_BF_right(Butterfly, τ), τ)
 end
 
-function recompress_BF_right(Butterfly::BF2)
+function recompress_BF_right(Butterfly::BF2, τ)
     Q = Butterfly.Q
     R = Butterfly.R
     P = Butterfly.P
     NS = Butterfly.NS
     NO = Butterfly.NO
     k = Butterfly.k
-    τ = Butterfly.τ
+    τ2 = Butterfly.τ
 
     # --- trees & helpers ---
     H2Blocktree = Butterfly.tree
@@ -39,14 +39,14 @@ function recompress_BF_right(Butterfly::BF2)
         R_u = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
         l >= LS && (source_is_frozen = true)
         l >= LO && (obs_is_frozen = true)
-        test = collect(keys(R[lold]))[1]
-        lS = LevelS + 1 - level(trialT, test)
-        lO = LevelO + 1 - level(testT, collect(keys(R[lold][test]))[1])
+        #test = collect(keys(R[lold]))[1]
+        #lS = LevelS + 1 - level(trialT, test)
+        #lO = LevelO + 1 - level(testT, collect(keys(R[lold][test]))[1])
         if source_is_frozen && obs_is_frozen
             break
         elseif !source_is_frozen && !obs_is_frozen
-            for nodeS in treeS[lS - 1]
-                for nodeO in treeO[lO - 1]
+            for nodeS in treeS[l]
+                for nodeO in treeO[LO - l]
                     for Schild in children(trialT, nodeS)
                         R_k = Vector{Matrix{ComplexF64}}()
                         row_spc = Vector{Int}()
@@ -80,7 +80,7 @@ function recompress_BF_right(Butterfly::BF2)
         end
     end
 
-    return BF2(Q, R, P, H2Blocktree, Butterfly.dim, Butterfly.level, NS, NO, k, τ)
+    return BF2(Q, R, P, H2Blocktree, Butterfly.dim, Butterfly.level, NS, NO, k, τ2)
 end
 
 @views function update_next_level_R_right!(R, Q, R_u, l, H2Blocktree, NS, NO)

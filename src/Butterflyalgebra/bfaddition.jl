@@ -10,7 +10,7 @@ this new struct is of pure algebraic interest and has lost its physical meaningf
 as much as it would ve if we were to add the two matrices behind them. Also be aware that im
 only tackling the symetric case of a BF.=#
 
-function add_eqbf(BF1::BF2, BF_2::BF2)
+function add_eqbf(BF1::BF2, BF_2::BF2, τ)
     @assert BF1.NS == BF_2.NS && BF1.NO == BF_2.NO "rootids must match for addition."
     # --- Case 1: Same source and observer clusters ---
     R_new = Dict{Int,Dict{Int,Dict{Int,AbstractMatrix{ComplexF64}}}}()
@@ -49,6 +49,7 @@ function add_eqbf(BF1::BF2, BF_2::BF2)
             BF1.k,
             max(BF1.τ, BF_2.τ),
         ),
+        τ,
     )
 end
 
