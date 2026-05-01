@@ -7,3 +7,4 @@
 *.cov
 *.info
 /.VSCodeCounter
+/src/Butterflyalgebra/old.jl

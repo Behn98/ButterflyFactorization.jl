@@ -1,156 +1,141 @@
-function mulBFs(BF_1::BF2, BF_2::BF2)
-    children = H2Tree.children
-    trialT1 = H2Trees.trialtree(BF_1.tree)
-    # Sequential join of the two BFs.
-    R_new = Vector{Dict{Int,Dict{Int,Matrix{ComplexF64}}}}(
-        undef, length(BF_1) + length(BF_2) - 3
-    )
-    RL1 = length(BF_1) - 2
-    RL2 = length(BF_2) - 2
-    @assert RL1 == RL2 "Currently only supports multiplication of BFs with the same number of levels, but got $(RL1) and $(RL2)"
-    for l in 1:(RL1 - 1)
-        R_new[l] = BF_1.R[l + 1]
-    end
-    for l in 1:(RL2 - 1)
-        R_new[l + RL1] = BF_2.R[l]
-    end
-    Q_new = Dict{Int,Matrix{ComplexF64}}()
-    for k in keys(BF_1.Q)
-        Q_new[k] = BF_2.Q[k]
-    end
+# A generic factor is just Dict{RowKey, Dict{ColKey, Matrix}}
+function swap_and_recompress(LeftFactor, RightFactor, τ)
+    NewLeftFactor = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
+    NewRightFactor = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
 
-    P_new = Dict{Int,Matrix{ComplexF64}}()
-    for k in keys(BF_1.P)
-        P_new[k] = BF_1.P[k]
-    end
+    # 1. Loop over the outer row space
+    for row_node in keys(LeftFactor)
 
-    #Compute M = Q_1 * P_1, Factorization now: Z = P_1 * R_1^RL1 * .... R^1 * M * R_2^RL2 * ... R_2^1 * Q_2
-    #or in new indices: Z = P_1 * R_1^L_new * .... R_1^RL2+2 * M * R_2^RL2 * ... R_2^1 * Q_2
-    M = Dict{Int,Matrix{ComplexF64}}()
-    for nodeS in keys(BF_1.Q)
-        M[nodeS] = BF_1.Q[nodeS] * BF_2.P[nodeS]
-    end
-    M1 = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
-    for Snode in keys(BF_1.R[1])
-        for Onode in keys(BF_1.R[1][Snode])
-            if !haskey(M1, Snode)
-                M1[Snode] = Dict{Int,Matrix{ComplexF64}}()
-            end
-            M1[Snode][Onode] = BF_1.R[1][Snode][Onode] * M[Snode]
-        end
-    end
-    M2 = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
-    for Onode in keys(M1)
-        for Onode2 in keys(M1[Onode])
-            for Snode in keys(BF_2.R[RL2])
-                if !haskey(M2, Snode)
-                    M2[Snode] = Dict{Int,Matrix{ComplexF64}}()
-                end
-                if !haskey(BF_2.R[RL2][Snode], Onode)
-                    update_mat = M1[Onode][Onode2] * BF_2.R[RL2][Snode][Onode]
-                    dim1, dim2 = size(update_mat)
+        # 2. Loop over the outer column space
+        # (You have to find all possible col_nodes by scanning the RightFactor)
+        target_col_nodes = unique([
+            col for inner in keys(LeftFactor[row_node]) if haskey(RightFactor, inner) for
+            col in keys(RightFactor[inner])
+        ])
 
-                    # Initialize with zeros if the key 'Onode' does not exist yet
-                    get!(M2[Snode], Onode2) do
-                        zeros(ComplexF64, dim1, dim2)
+        for col_node in target_col_nodes
+            local_block = nothing
+
+            # 3. Sum over the shared middle index
+            for inner_node in keys(LeftFactor[row_node])
+                if haskey(RightFactor, inner_node) &&
+                    haskey(RightFactor[inner_node], col_node)
+                    update =
+                        LeftFactor[row_node][inner_node] * RightFactor[inner_node][col_node]
+
+                    if local_block === nothing
+                        local_block = copy(update)
+                    else
+                        local_block += update
                     end
-
-                    M2[Snode][Onode2] += update_mat
                 end
+            end
+
+            # 4. RRQR and Split
+            if local_block !== nothing
+                Q, R_qr = pqr(local_block, τ)
+
+                # 5. Populate the new dictionaries based purely on the outer keys
+                if !haskey(NewLeftFactor, row_node)
+                    NewLeftFactor[row_node] = Dict{Int,Matrix{ComplexF64}}()
+                end
+                NewLeftFactor[row_node][col_node] = Q
+
+                # R_qr maps from col_node to col_node (it's a square-ish mixing matrix)
+                if !haskey(NewRightFactor, col_node)
+                    NewRightFactor[col_node] = Dict{Int,Matrix{ComplexF64}}()
+                end
+                NewRightFactor[col_node][col_node] = R_qr
             end
         end
     end
-    M2 = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
-    for S_parent in keys(M2_uncompressed)
-        M2[S_parent] = Dict{Int,Matrix{ComplexF64}}()
-        for O_child in keys(M2_uncompressed[S_parent])
-            fat_block = M2_uncompressed[S_parent][O_child]
 
-            # Assuming you have a function `pqr` that takes a matrix and a tolerance τ
-            # If you are just keeping M2 as a single block for now, an SVD/truncated QR is fine.
-            # (If you are splitting it for the Bar Swap, you'd save Q and R separately).
-            Q, R_factor = pqr(fat_block, τ)
-
-            # Re-multiply them to store the low-rank approximation,
-            # OR pass Q and R_factor to the next stage of your sweep.
-            M2[S_parent][O_child] = Q * R_factor
-        end
-    end
-
-    M2_r = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
-    for S_parent in keys(M2)
-        M2_r[S_parent] = Dict{Int,Matrix{ComplexF64}}()
-        for O_child in keys(M2[S_parent])
-            fat_block = M2[S_parent][O_child]
-
-            # Assuming you have a function `pqr` that takes a matrix and a tolerance τ
-            # If you are just keeping M2 as a single block for now, an SVD/truncated QR is fine.
-            # (If you are splitting it for the Bar Swap, you'd save Q and R separately).
-            QRA = pqr(fat_block, τ)
-
-            # Re-multiply them to store the low-rank approximation,
-            # OR pass Q and R_factor to the next stage of your sweep.
-            M2[S_parent][O_child] = QRA[1] * QRA[2][:, invperm(QRA[3])]
-        end
-    end
-    #=
-    #Compute M = R_1^1 * M * R_2^RL2, Factorization now: Z = P_1 * R_1^L_new * .... R_1^RL2+1 * M * R_2^RL2-1 * ... R_2^1 * Q_2
-    M2 = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
-    for Snode in keys(BF_1.R[2])
-        for Schild in children(trialT1, Snode)
-            for Onode in keys(BF_1.R[1][Schild])
-                for Snode2 in keys(BF_2.R[RL2])
-                    if !haskey(M2, Snode2)
-                        M2[Snode2] = Dict{Int,Matrix{ComplexF64}}()
-                    end
-                    update_mat =
-                        BF_1.R[1][Schild][Onode] * M[Schild] * BF_2.R[RL2][Snode2][Schild]
-
-                    dim1, dim2 = size(update_mat)
-
-                    # Initialize with zeros if the key 'Onode' does not exist yet
-                    get!(M2[Snode2], Onode) do
-                        zeros(ComplexF64, dim1, dim2)
-                    end
-
-                    M2[Snode2][Onode] += update_mat
-                end
-            end
-        end
-    end
-    =#
-    R_new[RL1] = M2
-
-    k = RL2
-    for m in 1:(k - 1)
-        for t in 1:m
-            @views Barrowswap!(R_new, k + 1 - t)
-            @views multiply_level_R_right!(R_new, k - m)
-            recompress_FatBF!(P_new, R_new, Q_new)
-        end
-    end
-
-    return BF2(
-        Q_new,
-        R_new,
-        P_new,
-        BF_1.tree,
-        (size(BF_1, 1), size(BF_2, 2)), # Corrected Dim
-        RL1 + RL2 + 1,                 # Corrected Level count
-        BF_1.NS,
-        BF_2.NO,
-        k,
-        τ,         # Usually keep original NS/NO
-    )
+    return NewLeftFactor, NewRightFactor
 end
 
-@views function Barrowswap!(R_new::Vector{Dict{Int,Dict{Int,Matrix{ComplexF64}}}}, idx::Int)
-    Z_i = R_new[idx]
-    Z_ip1 = R_new[idx + 1]
-    for Snode in keys(Z_i)
-        for Onode in keys(Z_i[Snode])
-            #if
-            #end
+function mulBFs(BF_1::BF2, BF_2::BF2, τ::Float64)
+    # 1. Initialization and Leaf Fusion
+    # M maps Observer Leaves (Tree 2) to Source Leaves (Tree 1)
+    M_messenger = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
+    for leaf in keys(BF_1.Q)
+        # Initialize as a nested dict to work with swap_and_recompress
+        M_messenger[leaf] = Dict(leaf => BF_1.Q[leaf] * BF_2.P[leaf])
+    end
+
+    L = length(BF_1.R) # Number of R-levels
+    R_final = Dict{Int,Dict{Int,Dict{Int,Matrix{ComplexF64}}}}()
+
+    # 2. Folding Loop: From Leaves to Root (i = 1 to L)
+    # We "eat" R_1[i] and R_2[L-i+1] to produce R_final[i]
+    for i in 1:L
+        # Step A: Multiply Left Factor with current Messenger
+        # R_1[i] maps: Snode -> O_child (where Snode is the leaf or parent level)
+        # M_messenger maps: O_child -> O_child_from_T2
+        temp_left, M_mid = swap_and_recompress(BF_1.R[i], M_messenger, τ)
+
+        # Step B: Multiply Result with Right Factor
+        # BF_2.R[L-i+1] maps: S_parent -> S_child (Tree 2)
+        # M_mid maps: S_child -> O_child (Tree 1)
+        temp_right, M_next = swap_and_recompress(M_mid, BF_2.R[L - i + 1], τ)
+
+        # Step C: The "Fold" - Contract the two basis factors into one
+        # These two share the same inner dimension after recompression
+        R_level_i = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
+        for row in keys(temp_left)
+            for inner in keys(temp_left[row])
+                if haskey(temp_right, inner)
+                    for col in keys(temp_right[inner])
+                        if !haskey(R_level_i, row)
+                            R_level_i[row] = Dict{Int,Matrix{ComplexF64}}()
+                        end
+
+                        # Product of basis matrices to form the new level factor
+                        prod = temp_left[row][inner] * temp_right[inner][col]
+
+                        if !haskey(R_level_i[row], col)
+                            R_level_i[row][col] = prod
+                        else
+                            R_level_i[row][col] += prod
+                        end
+                    end
+                end
+            end
+        end
+
+        # Store the level in the 3-key dictionary structure
+        R_final[i] = R_level_i
+        # Move the remaining coupling information to the next level
+        M_messenger = M_next
+    end
+
+    # 3. Final Boundary Resolution
+    # Absorb the final messenger into P_1
+    P_new = Dict{Int,Matrix{ComplexF64}}()
+    for row in keys(BF_1.P)
+        # M_messenger is now at the root level, mapping root_children -> root_children
+        for inner in keys(BF_1.P[row]) # This assumes BF_1.P is dict of dicts
+            if haskey(M_messenger, inner)
+                # In the final P, there is only one "col" (the root)
+                for col in keys(M_messenger[inner])
+                    update = BF_1.P[row][inner] * M_messenger[inner][col]
+                    P_new[row] = haskey(P_new, row) ? P_new[row] + update : update
+                end
+            end
         end
     end
+
+    # 4. Construct the BF2 Result
+    # Q remains Q_2, P is P_new, R is the 3-key dictionary R_final
+    return BF2(
+        BF_2.Q,         # Q_final = Q_2
+        R_final,       # R_final[level][Snode][Onode]
+        P_new,          # Updated P
+        H2Trees.BlockTree(H2Trees.testtree(BF_1.tree), H2Trees.trialtree(BF_2.tree)),      # Typically uses the structure of the first tree
+        (size(BF_1, 1), size(BF_2, 2)),
+        L,              # Resulting level count
+        BF_1.NO,
+        BF_2.NS,
+        BF_1.k,         # Or recalculated k
+        τ,
+    )
 end

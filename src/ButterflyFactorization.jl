@@ -24,5 +24,5 @@ include("Butterflyalgebra/matrixvector.jl")
 include("Butterflyalgebra/matrixmatrix.jl")
 include("Butterflyalgebra/algebraicrecomp.jl")
 include("Butterflyalgebra/bfaddition.jl")
-
+include("Butterflyalgebra/bfmultiplication.jl")
 end # module ButterflyFactorization
