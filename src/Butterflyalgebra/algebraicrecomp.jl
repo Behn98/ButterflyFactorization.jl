@@ -1,10 +1,23 @@
-struct algebraBF
+struct AlgBF
+    dim::Tuple{Int,Int}
     Q::Dict{Int,Matrix{ComplexF64}}
     R::Vector{Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}}
     P::Dict{Int,Matrix{ComplexF64}}
 end
 
-function Base.adjoint(B::algebraBF)
+function Base.size(A::ButterflyFactorization.AlgBF, dim=nothing)
+    if dim === nothing
+        return (A.dim[1], A.dim[2])
+    elseif dim == 1
+        return A.dim[1]
+    elseif dim == 2
+        return A.dim[2]
+    else
+        error("dim must be either 1 or 2")
+    end
+end
+
+function Base.adjoint(B::AlgBF)
     lr = length(B.R)
     R_adj = Vector{Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}}(
         undef, lr
@@ -33,14 +46,14 @@ function Base.adjoint(B::algebraBF)
     for k in keys(B.P)
         P_adj[k] = adjoint(B.P[k])
     end
-    return algebraBF(P_adj, R_adj, Q_adj)
+    return AlgBF(reverse(B.dim), P_adj, R_adj, Q_adj)
 end
 
-function recompress_BF_left(Butterfly::algebraBF, τ)
+function recompress_BF_left(Butterfly::AlgBF, τ)
     return recompress_BF_right(Butterfly', τ)'
 end
 
-function recompress_BF(Butterfly::algebraBF, τ)
+function recompress_BF(Butterfly::AlgBF, τ)
     return recompress_BF_left(recompress_BF_right(Butterfly, τ), τ)
 end
 
@@ -48,7 +61,7 @@ function recompress_BF(Butterfly::BF3, τ)
     Q = Butterfly.Q
     R = Butterfly.R
     P = Butterfly.P
-    BFalg = algebraBF(Q, R, P)
+    BFalg = AlgBF(Butterfly.dim, Q, R, P)
     BFalg = recompress_BF(BFalg, τ)
     return BF3(
         BFalg.Q,
@@ -64,7 +77,7 @@ function recompress_BF(Butterfly::BF3, τ)
     )
 end
 
-function recompress_BF_right(Butterfly::algebraBF, τ)
+function recompress_BF_right(Butterfly::AlgBF, τ)
     Q = Butterfly.Q
     R = Butterfly.R
     P = Butterfly.P
@@ -96,7 +109,7 @@ function recompress_BF_right(Butterfly::algebraBF, τ)
                 R_u[col_idx[1]] = Dict{Int,Matrix{ComplexF64}}()
             end
             if haskey(R_u[col_idx[1]], col_idx[2])
-                @show col_idx
+                @show "col_idx already exists in R_u, this should not happen!"
             end
             R_u[col_idx[1]][col_idx[2]] = QRA[2][:, invperm(QRA[3])]
             last = 0
@@ -114,7 +127,7 @@ function recompress_BF_right(Butterfly::algebraBF, τ)
         end
     end
 
-    return algebraBF(Q, R, P)
+    return AlgBF(Butterfly.dim, Q, R, P)
 end
 
 @views function update_next_level_R_right(

@@ -7,13 +7,19 @@
     return nothing
 end
 
+@inline function getsubdict!(D::Dict{Int,Dict{Tuple{Int,Int},T}}, k::Int) where {T}
+    get!(D, k) do
+        Dict{Tuple{Int,Int},T}()
+    end
+end
+
 function apply_BF3(Butterfly::BF3, v::Vector{ComplexF64})
     Q = Butterfly.Q
     R = Butterfly.R
     P = Butterfly.P
     NO = Butterfly.NO
     NS = Butterfly.NS
-    coefficients = Dict{Int,Dict{Int,Vector{ComplexF64}}}()
+    coefficients = Dict{Int,Dict{Tuple{Int,Int},Vector{ComplexF64}}}()
     H2Blocktree = Butterfly.tree
     trialT = H2Trees.trialtree(H2Blocktree)
     testT = H2Trees.testtree(H2Blocktree)
@@ -25,35 +31,29 @@ function apply_BF3(Butterfly::BF3, v::Vector{ComplexF64})
     # ------------------------------------------------------------
     for Sleaf in keys(Q)
         srcvals = values(trialT, Sleaf)
-        getsubdict!(coefficients, NO)[Sleaf] = Vector{ComplexF64}(undef, size(Q[Sleaf])[1])
-        @views mul!(coefficients[NO][Sleaf], Q[Sleaf], v[srcvals])
+        getsubdict!(coefficients, 0)[NO, Sleaf] = Vector{ComplexF64}(
+            undef, size(Q[Sleaf])[1]
+        )
+        @views mul!(coefficients[0][NO, Sleaf], Q[Sleaf], v[srcvals])
     end
 
     # Step 2: Sequentially apply R factors
     for l in eachindex(R)
-        for (obs_child, src_node) in keys(R[l])
+        for row in keys(R[l])
             first = true
-            for (obs_node, src_child) in keys(R[l][(obs_child, src_node)])
+            for col in keys(R[l][row])
                 if first
-                    getsubdict!(coefficients, obs_child)[src_node] = Vector{ComplexF64}(
-                        undef, size(R[l][(obs_child, src_node)][(obs_node, src_child)])[1]
+                    getsubdict!(coefficients, l)[row] = Vector{ComplexF64}(
+                        undef, size(R[l][row][col])[1]
                     )
                     @views mul!(
-                        coefficients[obs_child][src_node],
-                        R[l][(obs_child, src_node)][(obs_node, src_child)],
-                        coefficients[obs_node][src_child],
+                        coefficients[l][row], R[l][row][col], coefficients[l - 1][col]
                     )
                     first = false
                 else
-                    coeff_temp = Vector{ComplexF64}(
-                        undef, size(R[l][(obs_child, src_node)][(obs_node, src_child)])[1]
-                    )
-                    @views mul!(
-                        coeff_temp,
-                        R[l][(obs_child, src_node)][(obs_node, src_child)],
-                        coefficients[obs_node][src_child],
-                    )
-                    getsubdict!(coefficients, obs_child)[src_node] += coeff_temp
+                    coeff_temp = Vector{ComplexF64}(undef, size(R[l][row][col])[1])
+                    @views mul!(coeff_temp, R[l][row][col], coefficients[l - 1][col])
+                    coefficients[l][row] += coeff_temp
                 end
             end
         end
@@ -68,7 +68,7 @@ function apply_BF3(Butterfly::BF3, v::Vector{ComplexF64})
     for Oleaf in keys(P)
         inds = values(testT, Oleaf)
         dest = @view result[inds]
-        mul!(dest, P[Oleaf], coefficients[Oleaf][NS])
+        mul!(dest, P[Oleaf], coefficients[length(R)][(Oleaf, NS)])
     end
     return result
 end
