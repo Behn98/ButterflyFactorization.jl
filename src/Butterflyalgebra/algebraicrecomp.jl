@@ -1,47 +1,80 @@
-function recompress_BF_left(Butterfly::BF2, τ)
+struct algebraBF
+    Q::Dict{Int,Matrix{ComplexF64}}
+    R::Vector{Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}}
+    P::Dict{Int,Matrix{ComplexF64}}
+end
+
+function Base.adjoint(B::algebraBF)
+    lr = length(B.R)
+    R_adj = Vector{Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}}(
+        undef, lr
+    )
+    for l in eachindex(B.R)
+        newl = lr - l + 1
+        R_adj[newl] = Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}()
+        for nodeS in keys(B.R[l])
+            for nodeO in keys(B.R[l][nodeS])
+                if !haskey(R_adj[newl], reverse(nodeO))
+                    R_adj[newl][reverse(nodeO)] = Dict{
+                        Tuple{Int,Int},AbstractMatrix{ComplexF64}
+                    }()
+                end
+                R_adj[newl][reverse(nodeO)][reverse(nodeS)] = adjoint(B.R[l][nodeS][nodeO])
+            end
+        end
+    end
+
+    Q_adj = Dict{Int,Matrix{ComplexF64}}()
+    for k in keys(B.Q)
+        Q_adj[k] = adjoint(B.Q[k])
+    end
+
+    P_adj = Dict{Int,Matrix{ComplexF64}}()
+    for k in keys(B.P)
+        P_adj[k] = adjoint(B.P[k])
+    end
+    return algebraBF(P_adj, R_adj, Q_adj)
+end
+
+function recompress_BF_left(Butterfly::algebraBF, τ)
     return recompress_BF_right(Butterfly', τ)'
 end
 
-function recompress_BF(Butterfly::BF2, τ)
+function recompress_BF(Butterfly::algebraBF, τ)
     return recompress_BF_left(recompress_BF_right(Butterfly, τ), τ)
-end
-
-function recompress_BF_left(Butterfly::BF3, τ)
-    return recompress_BF_right(Butterfly', τ)'
 end
 
 function recompress_BF(Butterfly::BF3, τ)
-    return recompress_BF_left(recompress_BF_right(Butterfly, τ), τ)
-end
-
-function find_rows_for_column(R::Dict{T,Dict{T,Matrix}}, col_idx::Int) where {T}
-    rows = Vector{T}()
-    for (row, inner_dict) in R
-        if haskey(inner_dict, col_idx)
-            push!(rows, row)
-        end
-    end
-    return rows
-end
-
-function recompress_BF_right(Butterfly::BF3, τ)
     Q = Butterfly.Q
     R = Butterfly.R
     P = Butterfly.P
-    NS = Butterfly.NS
-    NO = Butterfly.NO
-    k = Butterfly.k
-    τ2 = Butterfly.τ
+    BFalg = algebraBF(Q, R, P)
+    BFalg = recompress_BF(BFalg, τ)
+    return BF3(
+        BFalg.Q,
+        BFalg.R,
+        BFalg.P,
+        Butterfly.tree,
+        Butterfly.dim,
+        Butterfly.level,
+        Butterfly.NS,
+        Butterfly.NO,
+        Butterfly.k,
+        Butterfly.τ,
+    )
+end
 
-    # --- trees & helpers ---
-    H2Blocktree = Butterfly.tree
-
+function recompress_BF_right(Butterfly::algebraBF, τ)
+    Q = Butterfly.Q
+    R = Butterfly.R
+    P = Butterfly.P
+    lr = length(R)
     for l in eachindex(R)
-        lold = Butterfly.level - l + 1
+        lold = lr - l + 1
         R_u = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
         col = Vector{Tuple{Int,Int}}(undef, 0)
         for row in keys(R[lold])
-            unique(append!(col, keys(R[lold][row])))
+            col = unique(append!(col, keys(R[lold][row])))
         end
         for col_idx in col
             rows_with_col = [
@@ -57,9 +90,13 @@ function recompress_BF_right(Butterfly::BF3, τ)
                 i += 1
             end
             A_k = vcat(R_k...)
+            #@show size(A_k)
             QRA = pqr(A_k; rtol=τ)
             if !haskey(R_u, col_idx[1])
                 R_u[col_idx[1]] = Dict{Int,Matrix{ComplexF64}}()
+            end
+            if haskey(R_u[col_idx[1]], col_idx[2])
+                @show col_idx
             end
             R_u[col_idx[1]][col_idx[2]] = QRA[2][:, invperm(QRA[3])]
             last = 0
@@ -70,142 +107,34 @@ function recompress_BF_right(Butterfly::BF3, τ)
                 j += 1
             end
         end
-        if l < Butterfly.level - 1
-            update_next_level_R_right!(R[lodl - 1], R_u)
+        if l < lr
+            R[lold - 1] = update_next_level_R_right(R_u, R[lold - 1])
         else
-            update_next_level_R_right!(Q, R_u)
+            Q = update_next_level_R_right(R_u, Q)
         end
     end
 
-    return BF3(Q, R, P, H2Blocktree, Butterfly.dim, Butterfly.level, NS, NO, k, τ2)
+    return algebraBF(Q, R, P)
 end
 
-@views function update_next_level_R_right!(
+@views function update_next_level_R_right(
+    R_u::Dict{Int,Dict{Int,Matrix{ComplexF64}}},
     rightfactor::Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}},
-    R_u::Dict{Int,AbstractMatrix{ComplexF64}},
 )
     for row in keys(rightfactor)
         for col in keys(rightfactor[row])
             rightfactor[row][col] = R_u[row[1]][row[2]] * rightfactor[row][col]
         end
     end
+    return rightfactor
 end
 
-@views function update_next_level_R_right!(
-    rightfactor::Dict{Int,AbstractMatrix{ComplexF64}},
-    R_u::Dict{Int,AbstractMatrix{ComplexF64}},
+@views function update_next_level_R_right(
+    R_u::Dict{Int,Dict{Int,Matrix{ComplexF64}}}, rightfactor::Dict{Int,Matrix{ComplexF64}}
 )
-    for nodeS in treeS[LS]
-        Q[nodeS] = R_u[nodeS][NO] * Q[nodeS]
+    NO = collect(keys(R_u))[1]
+    for nodeS in keys(rightfactor)
+        rightfactor[nodeS] = R_u[NO][nodeS] * rightfactor[nodeS]
     end
-end
-
-function recompress_BF_right(Butterfly::BF2, τ)
-    Q = Butterfly.Q
-    R = Butterfly.R
-    P = Butterfly.P
-    NS = Butterfly.NS
-    NO = Butterfly.NO
-    k = Butterfly.k
-    τ2 = Butterfly.τ
-
-    # --- trees & helpers ---
-    H2Blocktree = Butterfly.tree
-    trialT = H2Trees.trialtree(H2Blocktree)
-    testT = H2Trees.testtree(H2Blocktree)
-
-    children = H2Trees.children
-    level = H2Trees.level
-
-    treeS = h2treelevels(trialT, NS)
-    treeO = h2treelevels(testT, NO)
-    LevelS = level(trialT, NS)
-    LevelO = level(testT, NO)
-    LS = length(treeS)
-    LO = length(treeO)
-    L = max(LS, LO)
-
-    source_is_frozen = false
-    obs_is_frozen = false
-
-    for l in 1:(Butterfly.level - 1)
-        lold = Butterfly.level - l
-        R_u = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
-        l >= LS && (source_is_frozen = true)
-        l >= LO && (obs_is_frozen = true)
-        #test = collect(keys(R[lold]))[1]
-        #lS = LevelS + 1 - level(trialT, test)
-        #lO = LevelO + 1 - level(testT, collect(keys(R[lold][test]))[1])
-        if source_is_frozen && obs_is_frozen
-            break
-        elseif !source_is_frozen && !obs_is_frozen
-            for nodeS in treeS[l]
-                for nodeO in treeO[LO - l]
-                    for Schild in children(trialT, nodeS)
-                        R_k = Vector{Matrix{ComplexF64}}()
-                        row_spc = Vector{Int}()
-                        i = 1
-                        for Ochild in children(testT, nodeO)
-                            push!(R_k, R[lold][Schild][Ochild])
-                            push!(row_spc, size(R_k[i], 1))
-
-                            i += 1
-                        end
-                        A_k = vcat(R_k...)
-                        QRA = pqr(A_k; rtol=τ)
-                        if !haskey(R_u, Schild)
-                            R_u[Schild] = Dict{Int,Matrix{ComplexF64}}()
-                        end
-                        R_u[Schild][nodeO] = QRA[2][:, invperm(QRA[3])]
-                        last = 0
-                        j = 1
-                        for Ochild in children(testT, nodeO)
-                            R[lold][Schild][Ochild] = QRA[1][
-                                (last + 1):(last + row_spc[j]), :,
-                            ]
-                            last += row_spc[j]
-                            j += 1
-                        end
-                    end
-                end
-            end
-            update_next_level_R_right!(R, Q, R_u, l, H2Blocktree, NS, NO)
-        elseif !source_is_frozen && obs_is_frozen
-        end
-    end
-
-    return BF2(Q, R, P, H2Blocktree, Butterfly.dim, Butterfly.level, NS, NO, k, τ2)
-end
-
-@views function update_next_level_R_right!(R, Q, R_u, l, H2Blocktree, NS, NO)
-    # --- trees & helpers ---
-    trialT = H2Trees.trialtree(H2Blocktree)
-    testT = H2Trees.testtree(H2Blocktree)
-    children = H2Trees.children
-    level = H2Trees.level
-    treeS = h2treelevels(trialT, NS)
-    treeO = h2treelevels(testT, NO)
-
-    LS = length(treeS)
-    LO = length(treeO)
-
-    if l < LS - 1
-        lold = max(LO, LS) - l
-        test = collect(keys(R[lold]))[1]
-        lS = level(trialT, test)
-        lO = level(testT, collect(keys(R[lold][test]))[1])
-        for nodeS in treeS[lS]
-            for nodeO in treeO[lO - 1]
-                for Schild in children(trialT, nodeS)
-                    R[lold - 1][Schild][nodeO] =
-                        R_u[nodeS][nodeO] * R[lold - 1][Schild][nodeO]
-                    #@views mul!(R[nodeS][Ochild], R_u[nodeS][nodeO], R[nodeS][Ochild])
-                end
-            end
-        end
-    else
-        for nodeS in treeS[LS]
-            Q[nodeS] = R_u[nodeS][NO] * Q[nodeS]
-        end
-    end
+    return rightfactor
 end
