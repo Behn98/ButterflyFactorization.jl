@@ -1,35 +1,4 @@
-struct BF
-    Q::Dict{Int,AbstractMatrix{ComplexF64}}
-    R::Dict{Int,Dict{Int,AbstractMatrix{ComplexF64}}}
-    P::Dict{Int,AbstractMatrix{ComplexF64}}
-    NS::Int64
-    NO::Int64
-    k::Float64
-    τ::Float64
-    sym::Bool
-    BF(Q, R, P, NS, NO, k, τ, sym) = new(Q, R, P, NS, NO, k, τ, sym)
-end
-
-struct BF_Mats
-    Q::AbstractMatrix{ComplexF64}       #AbstractMatrix for SparseArrays, BlockSparseMatrix for BlockSparseMatrices
-    R::Vector{AbstractMatrix{ComplexF64}}       #AbstractMatrix for SparseArrays, BlockSparseMatrix for BlockSparseMatrices
-    P::AbstractMatrix{ComplexF64}       #AbstractMatrix for SparseArrays, BlockSparseMatrix for BlockSparseMatrices
-    NS::Int64
-    NO::Int64
-    k::Float64
-    τ::Float64
-    PermP::Vector{Int}          #permutation of source indices for P blocks, needed for correct assembly of R blocks
-    PermQ::Vector{Int}          #permutation of source indices for Q blocks, needed for correct assembly of R blocks
-    BF_Mats(Q, R, P, NS, NO, k, τ, PermP, PermQ) = new(Q, R, P, NS, NO, k, τ, PermP, PermQ)
-end
-
-@inline function getsubdict!(D::Dict{Int,Dict{Int,T}}, k::Int) where {T}
-    get!(D, k) do
-        Dict{Int,T}()
-    end
-end
-
-function subroutine_BF_approx_treeh2(
+function subroutine_BF(
     farassembler,
     H2Blocktree,
     NO::Int,
@@ -41,11 +10,10 @@ function subroutine_BF_approx_treeh2(
 
     # --- containers ---
     Q = Dict{Int,Matrix{ComplexF64}}()
-
-    R = Dict{Int,Dict{Int,Matrix{ComplexF64}}}()
     K = Dict{Int,Dict{Int,Vector{Int}}}()
     U = Dict{Int,Dict{Int,Vector{Int}}}()   #temporary unions
-
+    PermQ = Dict{Int,Vector{Int}}()
+    PermP = Dict{Int,Vector{Int}}()
     # --- trees & helpers ---
     trialT = H2Trees.trialtree(H2Blocktree)
     testT = H2Trees.testtree(H2Blocktree)
@@ -60,19 +28,23 @@ function subroutine_BF_approx_treeh2(
 
     LS = length(treeS)
     LO = length(treeO)
-    L = LS + LO
+    L = max(LS, LO)
+    R = Vector{Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}}(
+        undef, L - 1
+    )
 
     # ------------------------------------------------------------------
     # Leaf-level Q
     # ------------------------------------------------------------------
-    for Sleaf in treeS[LS]
+    for Sleaf in treeS[LS]  #--> watchout this does not take account of leaves being on
+        #higher levels, but we assume the tree is balanced enough that this is not a problem
         srcindex = values(trialT, Sleaf)
         obsindex = values(testT, NO)
         c_s = center(trialT, Sleaf)
         c_o = center(testT, NO)
         a_s = halfsize(trialT, Sleaf)
         a_o = halfsize(testT, NO)
-
+        PermQ[Sleaf] = srcindex
         n_otilde = estimate_rank_3d(k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3)
         q_ks, k_l, r_l = Compressor(farassembler, srcindex, obsindex, n_otilde, τ)
 
@@ -89,7 +61,11 @@ function subroutine_BF_approx_treeh2(
     for l in 1:(L - 1)
         l >= LS && (source_is_frozen = true)
         l >= LO && (obs_is_frozen = true)
-
+        if source_is_frozen && obs_is_frozen
+            break
+        else
+            R[l] = Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}()
+        end
         # --------------------------------------------------------------
         # Build U (union of child skeletons)
         # --------------------------------------------------------------
@@ -132,8 +108,14 @@ function subroutine_BF_approx_treeh2(
                         q_ks, k_l, r_l = Compressor(
                             farassembler, srcindex, obsindex, n_otilde, τ
                         )
-                        rowsizeR += size(q_ks, 1)
-                        getsubdict!(R, Svert)[Ochild] = q_ks
+                        last = 0
+                        for Schild in children(trialT, Svert)
+                            ks = length(getsubdict!(K, Schild)[Overt])
+                            getsubdict!(R[l], (Ochild, Svert))[(Overt, Schild)] = q_ks[
+                                :, (last + 1):(last + ks)
+                            ]
+                            last += ks
+                        end
                         getsubdict!(K, Svert)[Ochild] = k_l
                     end
                 end
@@ -157,8 +139,14 @@ function subroutine_BF_approx_treeh2(
                         q_ks, k_l, r_l = Compressor(
                             farassembler, srcindex, obsindex, n_otilde, τ
                         )
-                        getsubdict!(R, Svert)[Ochild] = q_ks
-
+                        last = 0
+                        for Schild in children(trialT, Svert)
+                            ks = length(getsubdict!(K, Schild)[Overt])
+                            getsubdict!(R[l], (Ochild, Svert))[(Overt, Schild)] = q_ks[
+                                :, (last + 1):(last + ks)
+                            ]
+                            last += ks
+                        end
                         getsubdict!(K, Svert)[Ochild] = k_l
                     end
                 end
@@ -183,7 +171,14 @@ function subroutine_BF_approx_treeh2(
                         farassembler, srcindex, obsindex, n_otilde, τ
                     )
 
-                    getsubdict!(R, Svert)[Overt] = q_ks
+                    last = 0
+                    for Schild in children(trialT, Svert)
+                        ks = length(getsubdict!(K, Schild)[Overt])
+                        getsubdict!(R[l], (Overt, Svert))[(Overt, Schild)] = q_ks[
+                            :, (last + 1):(last + ks)
+                        ]
+                        last += ks
+                    end
                     getsubdict!(K, Svert)[Overt] = k_l
                 end
             end
@@ -203,14 +198,24 @@ function subroutine_BF_approx_treeh2(
 
         Z = zeros(ComplexF64, length(row), length(col))
         farassembler(Z, row, col)
-
+        PermP[Oleaf] = row
         P[Oleaf] = Z
     end
-    result = BF(Q, R, P, NS, NO, k, τ, false)
-    return result
+    return BF(
+        Q,
+        R,
+        P,
+        PermQ,
+        PermP,
+        (length(values(testT, NO)), length(values(trialT, NS))),
+        NS,
+        NO,
+        k,
+        τ,
+    )
 end
 
-function subroutine_BF_approx_treeh2_mats(
+function subroutine_BF_mats(
     farassembler,
     H2Blocktree,
     NO::Int,

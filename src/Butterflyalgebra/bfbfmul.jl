@@ -1,6 +1,4 @@
-function mulBFs(BF_1::BF3, BF_2::BF3, τ::Float64)
-    # 1. Initialization and Leaf Fusion
-    # M maps Observer Leaves (Tree 2) to Source Leaves (Tree 1)
+function mulBFs(BF_1::BF, BF_2::BF, τ::Float64)
     @assert BF_1.level == BF_2.level "Both BFs must have the same number of levels"
     @assert BF_1.NS == BF_2.NO "Source and Observer dimensions must match for multiplication"
     M_messenger = Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}()
@@ -26,15 +24,14 @@ function mulBFs(BF_1::BF3, BF_2::BF3, τ::Float64)
         end
         result = recompress_BF(mul_factors(result, L + 1 - m), τ)
     end
-    # 4. Construct the BF2 Result
-    # Q remains Q_2, P is P_new, R is the 3-key dictionary R_final
-    return BF3(
+
+    return BF(
         result.Q,         # Q_final = Q_2
         result.R,       # R_final[level][Snode][Onode]
         result.P,          # Updated P
-        BF_1.tree,      # Typically uses the structure of the first tree
+        BF_2.PermQ,       # Q Permutations remain the same as BF_2
+        BF_1.PermP,     # P Permutations remain the same as BF_1
         (size(BF_1, 1), size(BF_2, 2)),
-        L,              # Resulting level count
         BF_2.NS,
         BF_1.NO,
         BF_1.k,         # Or recalculated k
@@ -172,4 +169,89 @@ function swap_and_recompress(LeftFactor, RightFactor, τ)
     end
 
     return NewLeftFactor, NewRightFactor
+end
+
+function swap_and_recompress2(LeftFactor, RightFactor, τ; kmax=100)
+
+    # store low-rank triples per (row,col)
+    Acc = Dict{
+        Tuple{Tuple{Int,Int},Tuple{Int,Int}},
+        Tuple{
+            Union{Matrix{ComplexF64},Nothing},
+            Union{Vector{Float64},Nothing},
+            Union{Matrix{ComplexF64},Nothing},
+        },
+    }()
+
+    for (row, innerL) in LeftFactor
+        for (k, Lblock) in innerL
+            if !haskey(RightFactor, k)
+                continue
+            end
+
+            for (col, Rblock) in RightFactor[k]
+                key = (row, col)
+
+                A_new = Lblock * Rblock  # small
+
+                if !haskey(Acc, key)
+                    Acc[key] = (nothing, nothing, nothing)
+                end
+
+                U, S, V = Acc[key]
+
+                U, S, V = lowrank_add!(U, S, V, A_new, τ, kmax)
+
+                Acc[key] = (U, S, V)
+            end
+        end
+    end
+
+    # split into Left/Right factors
+    NewLeft  = Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},Matrix{ComplexF64}}}()
+    NewRight = Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},Matrix{ComplexF64}}}()
+
+    for ((row, col), (U, S, V)) in Acc
+        if U === nothing
+            continue
+        end
+
+        sqrtS = sqrt.(S)
+
+        UL = U * Diagonal(sqrtS)
+        VR = Diagonal(sqrtS) * V'
+
+        if !haskey(NewLeft, row)
+            NewLeft[row] = Dict{Tuple{Int,Int},Matrix{ComplexF64}}()
+        end
+        NewLeft[row][col] = UL
+
+        if !haskey(NewRight, col)
+            NewRight[col] = Dict{Tuple{Int,Int},Matrix{ComplexF64}}()
+        end
+        NewRight[col][col] = VR
+    end
+
+    return NewLeft, NewRight
+end
+
+function lowrank_add!(U, S, V, A_new, τ, kmax)
+    # current approx: U * Diagonal(S) * V'
+    # add: A_new
+
+    if U === nothing
+        # first contribution
+        F = svd(A_new; full=false)
+        r = min(sum(F.S .> τ), kmax)
+        return F.U[:, 1:r], F.S[1:r], F.V[:, 1:r]
+    end
+
+    # form small augmented matrix
+    A_old = U * Diagonal(S) * V'
+    A = A_old + A_new   # small (k-sized), safe
+
+    F = svd(A; full=false)
+    r = min(sum(F.S .> τ), kmax)
+
+    return F.U[:, 1:r], F.S[1:r], F.V[:, 1:r]
 end

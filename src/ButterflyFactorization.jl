@@ -10,19 +10,33 @@ using OhMyThreads
 using LowRankApprox
 using SparseArrays
 
+#Helper funcitons
+include("auxillaries.jl")
+
+#Kernelmatrix import
 include("kernelmatrix/abstractkernelmatrix.jl")
 include("kernelmatrix/beastkernelmatrix.jl")
-include("nearinteractions.jl")
+
+#Butterfly algebra --> any Block related functions
+include("Butterflyalgebra/bfstructs.jl")
+include("Butterflyalgebra/bfdims.jl")
+include("Butterflyalgebra/bfvector.jl")
+include("Butterflyalgebra/bfmatrix.jl")
+include("Butterflyalgebra/algrecomp.jl")
+include("Butterflyalgebra/bfbfadd.jl")
+include("Butterflyalgebra/bfbfmul.jl")
+
+#Tree traversale and Butterfly construction
+include("intlists.jl")
 include("compressors.jl")
 include("subroutines.jl")
-include("symstruct.jl")
-include("bfmult.jl")
-include("symbfmult.jl")
-include("auxillaries.jl")
+
+#Full Matrix Assembly
 include("ButterflyFactorization/petrovgalerkinbf.jl")
-include("Butterflyalgebra/matrixvector.jl")
-include("Butterflyalgebra/matrixmatrix.jl")
-include("Butterflyalgebra/algebraicrecomp.jl")
-include("Butterflyalgebra/bfaddition.jl")
-include("Butterflyalgebra/bfmultiplication.jl")
-end # module ButterflyFactorization
+
+include("matrixalgebra/dims.jl")
+include("matrixalgebra/matrixadjtr.jl")
+include("matrixalgebra/matrixvector.jl")
+include("matrixalgebra/matrixmatrix.jl")
+
+end

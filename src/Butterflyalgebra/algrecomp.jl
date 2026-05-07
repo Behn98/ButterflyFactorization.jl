@@ -1,54 +1,3 @@
-struct AlgBF
-    dim::Tuple{Int,Int}
-    Q::Dict{Int,Matrix{ComplexF64}}
-    R::Vector{Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}}
-    P::Dict{Int,Matrix{ComplexF64}}
-end
-
-function Base.size(A::ButterflyFactorization.AlgBF, dim=nothing)
-    if dim === nothing
-        return (A.dim[1], A.dim[2])
-    elseif dim == 1
-        return A.dim[1]
-    elseif dim == 2
-        return A.dim[2]
-    else
-        error("dim must be either 1 or 2")
-    end
-end
-
-function Base.adjoint(B::AlgBF)
-    lr = length(B.R)
-    R_adj = Vector{Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}}(
-        undef, lr
-    )
-    for l in eachindex(B.R)
-        newl = lr - l + 1
-        R_adj[newl] = Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}()
-        for nodeS in keys(B.R[l])
-            for nodeO in keys(B.R[l][nodeS])
-                if !haskey(R_adj[newl], reverse(nodeO))
-                    R_adj[newl][reverse(nodeO)] = Dict{
-                        Tuple{Int,Int},AbstractMatrix{ComplexF64}
-                    }()
-                end
-                R_adj[newl][reverse(nodeO)][reverse(nodeS)] = adjoint(B.R[l][nodeS][nodeO])
-            end
-        end
-    end
-
-    Q_adj = Dict{Int,Matrix{ComplexF64}}()
-    for k in keys(B.Q)
-        Q_adj[k] = adjoint(B.Q[k])
-    end
-
-    P_adj = Dict{Int,Matrix{ComplexF64}}()
-    for k in keys(B.P)
-        P_adj[k] = adjoint(B.P[k])
-    end
-    return AlgBF(reverse(B.dim), P_adj, R_adj, Q_adj)
-end
-
 function recompress_BF_left(Butterfly::AlgBF, τ)
     return recompress_BF_right(Butterfly', τ)'
 end
@@ -57,19 +6,19 @@ function recompress_BF(Butterfly::AlgBF, τ)
     return recompress_BF_left(recompress_BF_right(Butterfly, τ), τ)
 end
 
-function recompress_BF(Butterfly::BF3, τ)
+function recompress_BF(Butterfly::BF, τ)
     Q = Butterfly.Q
     R = Butterfly.R
     P = Butterfly.P
     BFalg = AlgBF(Butterfly.dim, Q, R, P)
     BFalg = recompress_BF(BFalg, τ)
-    return BF3(
+    return BF(
         BFalg.Q,
         BFalg.R,
         BFalg.P,
-        Butterfly.tree,
+        Butterfly.PermQ,
+        Butterfly.PermP,
         Butterfly.dim,
-        Butterfly.level,
         Butterfly.NS,
         Butterfly.NO,
         Butterfly.k,

@@ -8,3 +8,4 @@
 *.info
 /.VSCodeCounter
 /src/Butterflyalgebra/old.jl
+/src/old.jl

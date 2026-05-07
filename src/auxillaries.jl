@@ -98,68 +98,6 @@ function blocksparse_vcat(blocks...)
     )
 end
 
-function Base.adjoint(t::BF_Mats)
-    return BF_Mats(
-        t.P',                                                      # Q becomes P'
-        AbstractMatrix{ComplexF64}[r' for r in Iterators.reverse(t.R)], # Reverse and map R
-        t.Q',                                                      # P becomes Q'
-        t.NO,                                                      # NS and NO swap roles
-        t.NS,
-        t.k,
-        t.τ,
-        t.PermQ,                                                   # Permutations swap roles
-        t.PermP,
-    )
-end
-
-function Base.transpose(t::BF_Mats)
-    return BF_Mats(
-        transpose(t.P),
-        AbstractMatrix{ComplexF64}[transpose(r) for r in Iterators.reverse(t.R)],
-        transpose(t.Q),
-        t.NO,
-        t.NS,
-        t.k,
-        t.τ,
-        t.PermQ,
-        t.PermP,
-    )
-end
-
-function applyBF_Mats(t::BF_Mats, v::Vector{ComplexF64})
-    y = v[t.PermQ]  #permute input vector according to Q blocks
-    y = t.Q * y
-    for R_block in t.R
-        y = R_block * y
-    end
-    y = t.P * y
-    y_out = zeros(ComplexF64, length(v))
-    y_out[t.PermP] = y  #permute output vector according to P blocks
-    return y_out
-end
-
-function applyBF_Mats_adjoint(t::BF_Mats, v::Vector{ComplexF64})
-    # Gather input using the observer permutation
-    y = v[t.PermP]
-
-    # Adjoint of P
-    y = t.P' * y
-
-    # Adjoint of R blocks in reverse order
-    for R_block in Iterators.reverse(t.R)
-        y = R_block' * y
-    end
-
-    # Adjoint of Q
-    y = t.Q' * y
-
-    # Scatter output to the correct geometric source coordinates
-    y_out = zeros(ComplexF64, length(v))
-    y_out[t.PermQ] = y
-
-    return y_out
-end
-
 function h2treelevels(tree::H2Trees.TwoNTree, root::Int64)
     isleaf = H2Trees.isleaf
     getchildren = H2Trees.children
@@ -181,6 +119,20 @@ function h2treelevels(tree::H2Trees.TwoNTree, root::Int64)
     end
 
     return levels
+end
+
+@inline function getsubdict!(D::Dict{Int,Dict{Int,T}}, k::Int) where {T}
+    get!(D, k) do
+        Dict{Int,T}()
+    end
+end
+
+@inline function getsubdict!(
+    D::Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},T}}, k::Tuple{Int,Int}
+) where {T}
+    get!(D, k) do
+        Dict{Tuple{Int,Int},T}()
+    end
 end
 
 function find_rows_for_column(R::Dict{T,Dict{T,Matrix}}, col_idx::Int) where {T}

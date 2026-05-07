@@ -1,49 +1,3 @@
-struct PetrovGalerkinBF_mats{T,NearInteractionsType} <: LinearMaps.LinearMap{T}
-    nearinteractions::NearInteractionsType
-    # Here come all other fields needed for the ButterflyFactorization
-    dim::Tuple{Int,Int}
-    #tree::H2Trees.BlockTree                            #not necessary for matrix version but for the dicts version
-    farinteractions::Dict{Int64,Vector{Int64}}           #observernodeid --> sourcenodeid
-    BFs::Vector{BF_Mats}                    #BF --> dictionary version BF_Mats matrix version
-    function PetrovGalerkinBF_mats{T}(
-        nearinteractions,
-        #tree,
-        farinteractions,
-        BFs,
-        dim,
-    ) where {T}
-        return new{T,typeof(nearinteractions)}(
-            nearinteractions,
-            dim,
-            # Here come all other fields needed for the ButterflyFactorization
-            #tree,#::H2Trees.BlockTree
-            farinteractions,#::Dict{Int64,Vector{Int64}}           #observernodeid --> sourcenodeid
-            BFs,#::Vector{BF}
-        )
-    end
-end
-
-struct PetrovGalerkinBF{T,NearInteractionsType} <: LinearMaps.LinearMap{T}
-    nearinteractions::NearInteractionsType
-    # Here come all other fields needed for the ButterflyFactorization
-    dim::Tuple{Int,Int}
-    tree::H2Trees.BlockTree                            #not necessary for matrix version but for the dicts version
-    farinteractions::Dict{Int64,Vector{Int64}}           #observernodeid --> sourcenodeid
-    BFs::Vector{BF}                    #BF --> dictionary version BF_Mats matrix version
-    function PetrovGalerkinBF{T}(
-        nearinteractions, tree, farinteractions, BFs, dim
-    ) where {T}
-        return new{T,typeof(nearinteractions)}(
-            nearinteractions,
-            dim,
-            # Here come all other fields needed for the ButterflyFactorization
-            tree,#::H2Trees.BlockTree
-            farinteractions,#::Dict{Int64,Vector{Int64}}           #observernodeid --> sourcenodeid
-            BFs,#::Vector{BF}
-        )
-    end
-end
-
 function PetrovGalerkinBF_mats(
     operator,
     testspace,
@@ -73,9 +27,7 @@ function PetrovGalerkinBF_mats(
         for NS in source_nodes
             push!(
                 fly,
-                subroutine_BF_approx_treeh2_mats(
-                    nearmatrix, tree, NO, NS, k, tol; Compressor=Compressor
-                ),
+                subroutine_BF_mats(nearmatrix, tree, NO, NS, k, tol; Compressor=Compressor),
             )
             #end
         end
@@ -118,12 +70,8 @@ function PetrovGalerkinBF(
     for (NO, source_nodes) in farints
         for NS in source_nodes
             push!(
-                fly,
-                subroutine_BF_approx_treeh2(
-                    nearmatrix, tree, NO, NS, k, tol; Compressor=Compressor
-                ),
+                fly, subroutine_BF(nearmatrix, tree, NO, NS, k, tol; Compressor=Compressor)
             )
-            #end
         end
     end
 
