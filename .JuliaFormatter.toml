@@ -2,6 +2,7 @@
 style = "blue"
 
 margin = 92
+indent = 4
 
 align_assignment = true
 align_matrix = true

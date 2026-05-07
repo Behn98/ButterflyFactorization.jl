@@ -1,5 +1,38 @@
+"""
+The subroutines are the core for producing the butterfly factorization. They produce the Q,
+R and P blocks as well as the permutations of the source and observer indices for the Q and
+P blocks, which are needed for the correct MV products without saving the tree explicitly.
+NO and NS are the IDs of the root nodes related by the Butterfly. The subroutine_BF produces
+the Butterfly in a dictionary format, which is more intuitive and easier to debug. The
+subroutine_BF_mats produces the Butterfly in a matrix format, which is more efficient for MV
+products. The Compressor argument allows for different compression schemes to be used, with
+the default being a partial QR decomposition. Note that the kernelmatrix is a function that
+computes the matrix entries for given row and column indices, and is used in the compression
+step to compute the low-rank approximations of the blocks. The subroutines traverse the H2
+tree structure to compute the necessary blocks for the Butterfly factorization, starting
+from the leaf level and moving up to the root of the source/trial tree and to the leafs of
+the observer/test tree, while keeping track of the necessary permutations and unions of
+skeletons. Be aware that also the wavenumber k plays a crucial role in the estimation of the
+ranks and thus in the overall performance of the factorization. In terms of memory
+efficiency, the matrices turn out to be less efficient than the dicitionaries, due to the
+necessary overhead of saving the nonzero entry indices in the sparse/block-sparse format,
+which is not needed in the dictionary format. However, the matrix format allows for much
+faster MV products as well as providing a visualization of the structure of the Butterfly,
+which can be helpful for debugging and understanding the factorization. The choice between
+the two formats depends on the specific use case and requirements of the application.
+Algebraic operations on the Butterfly factorization, such as addition and multiplication,
+can be implemented using the dictionary format, as it allows for more flexible manipulation
+of the blocks and their indices. The matrix format can be used for efficient application of
+the Butterfly to vectors, but may not be as convenient for algebraic operations that require
+access to individual blocks. Overall, the subroutines provide a way to construct the
+Butterfly factorization from the H2 tree structure and the kernel matrix, with flexibility
+in the choice of compression scheme and output format. Additionally unbalanced trees are
+supported just as well as trees of different height. this allows for more efficiency when
+compressing farinteractions.
+"""
+
 function subroutine_BF(
-    farassembler,
+    kernelmatrix,
     H2Blocktree,
     NO::Int,
     NS::Int,
@@ -23,8 +56,8 @@ function subroutine_BF(
     halfsize = H2Trees.halfsize
     children = H2Trees.children
 
-    treeS = h2treelevels(trialT, NS)
-    treeO = h2treelevels(testT, NO)
+    treeS = traverseandpad(trialT, NS)
+    treeO = traverseandpad(testT, NO)
 
     LS = length(treeS)
     LO = length(treeO)
@@ -46,7 +79,7 @@ function subroutine_BF(
         a_o = halfsize(testT, NO)
         PermQ[Sleaf] = srcindex
         n_otilde = estimate_rank_3d(k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3)
-        q_ks, k_l, r_l = Compressor(farassembler, srcindex, obsindex, n_otilde, τ)
+        q_ks, k_l, r_l = Compressor(kernelmatrix, srcindex, obsindex, n_otilde, τ)
 
         Q[Sleaf] = q_ks
         getsubdict!(K, Sleaf)[NO] = k_l
@@ -106,7 +139,7 @@ function subroutine_BF(
                             k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3
                         )
                         q_ks, k_l, r_l = Compressor(
-                            farassembler, srcindex, obsindex, n_otilde, τ
+                            kernelmatrix, srcindex, obsindex, n_otilde, τ
                         )
                         last = 0
                         for Schild in children(trialT, Svert)
@@ -137,7 +170,7 @@ function subroutine_BF(
                             k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3
                         )
                         q_ks, k_l, r_l = Compressor(
-                            farassembler, srcindex, obsindex, n_otilde, τ
+                            kernelmatrix, srcindex, obsindex, n_otilde, τ
                         )
                         last = 0
                         for Schild in children(trialT, Svert)
@@ -168,7 +201,7 @@ function subroutine_BF(
                         k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3
                     )
                     q_ks, k_l, r_l = Compressor(
-                        farassembler, srcindex, obsindex, n_otilde, τ
+                        kernelmatrix, srcindex, obsindex, n_otilde, τ
                     )
 
                     last = 0
@@ -197,7 +230,7 @@ function subroutine_BF(
         row = values(testT, Oleaf)
 
         Z = zeros(ComplexF64, length(row), length(col))
-        farassembler(Z, row, col)
+        kernelmatrix(Z, row, col)
         PermP[Oleaf] = row
         P[Oleaf] = Z
     end
@@ -216,7 +249,7 @@ function subroutine_BF(
 end
 
 function subroutine_BF_mats(
-    farassembler,
+    kernelmatrix,
     H2Blocktree,
     NO::Int,
     NS::Int,
@@ -244,8 +277,8 @@ function subroutine_BF_mats(
     halfsize = H2Trees.halfsize
     children = H2Trees.children
 
-    treeS = h2treelevels(trialT, NS)
-    treeO = h2treelevels(testT, NO)
+    treeS = traverseandpad(trialT, NS)
+    treeO = traverseandpad(testT, NO)
 
     LS = length(treeS)
     LO = length(treeO)
@@ -263,7 +296,7 @@ function subroutine_BF_mats(
         a_s = halfsize(trialT, Sleaf)
         a_o = halfsize(testT, NO)
         n_otilde = estimate_rank_3d(k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3)
-        q_ks, k_l, r_l = Compressor(farassembler, srcindex, obsindex, n_otilde, τ)
+        q_ks, k_l, r_l = Compressor(kernelmatrix, srcindex, obsindex, n_otilde, τ)
         Q = sparse_blockdiag(Q, q_ks)               #SPARSITY: sparse_ or blocksparse_
         getsubdict!(K, Sleaf)[NO] = k_l
     end
@@ -319,7 +352,7 @@ function subroutine_BF_mats(
                             k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3
                         )
                         q_ks, k_l, r_l = Compressor(
-                            farassembler, srcindex, obsindex, n_otilde, τ
+                            kernelmatrix, srcindex, obsindex, n_otilde, τ
                         )
                         R_temp3 = sparse_blockdiag(R_temp3, q_ks)   #SPARSITY: sparse_ or blocksparse_
                         getsubdict!(K, Svert)[Ochild] = k_l
@@ -352,7 +385,7 @@ function subroutine_BF_mats(
                             k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3
                         )
                         q_ks, k_l, r_l = Compressor(
-                            farassembler, srcindex, obsindex, n_otilde, τ
+                            kernelmatrix, srcindex, obsindex, n_otilde, τ
                         )
                         R_temp3 = sparse_blockdiag(R_temp3, q_ks)   #SPARSITY: sparse_ or blocksparse_
 
@@ -383,7 +416,7 @@ function subroutine_BF_mats(
                         k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3
                     )
                     q_ks, k_l, r_l = Compressor(
-                        farassembler, srcindex, obsindex, n_otilde, τ
+                        kernelmatrix, srcindex, obsindex, n_otilde, τ
                     )
                     R_temp2 = sparse_blockdiag(R_temp2, q_ks)   #SPARSITY: sparse_ or blocksparse_
 
@@ -406,7 +439,7 @@ function subroutine_BF_mats(
         row = values(testT, Oleaf)
         push!(PermP, row...)
         Z = zeros(ComplexF64, length(row), length(col))
-        farassembler(Z, row, col)
+        kernelmatrix(Z, row, col)
         P = sparse_blockdiag(P, Z)              #SPARSITY: sparse_ or blocksparse_
     end
     return BF_Mats(Q, R, P, NS, NO, τ, k, PermP, PermQ)

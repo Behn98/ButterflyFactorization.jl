@@ -32,6 +32,7 @@ include("compressors.jl")
 include("subroutines.jl")
 
 #Full Matrix Assembly
+include("ButterflyFactorization/matrixstructs.jl")
 include("ButterflyFactorization/petrovgalerkinbf.jl")
 
 include("matrixalgebra/dims.jl")
