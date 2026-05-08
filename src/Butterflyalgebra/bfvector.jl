@@ -7,7 +7,7 @@
     return nothing
 end
 
-function apply_BF(Butterfly::BF, v::Vector{ComplexF64})
+function apply_BF(Butterfly::BF, v::AbstractVector{ComplexF64})
     Q = Butterfly.Q
     R = Butterfly.R
     P = Butterfly.P
@@ -16,21 +16,21 @@ function apply_BF(Butterfly::BF, v::Vector{ComplexF64})
     PermQ = Butterfly.PermQ
     PermP = Butterfly.PermP
     coefficients = Dict{Int,Dict{Tuple{Int,Int},Vector{ComplexF64}}}()
-    H2Blocktree = Butterfly.tree
-    trialT = H2Trees.trialtree(H2Blocktree)
-    testT = H2Trees.testtree(H2Blocktree)
+    #H2Blocktree = Butterfly.tree
+    #trialT = H2Trees.trialtree(H2Blocktree)
+    #testT = H2Trees.testtree(H2Blocktree)
 
-    values = H2Trees.values
+    #values = H2Trees.values
 
     # ------------------------------------------------------------
     # Leaf initialization
     # ------------------------------------------------------------
     for Sleaf in keys(Q)
         srcvals = PermQ[Sleaf]  # Get the permuted source indices for this leaf
-        getsubdict!(coefficients, 0)[NO, Sleaf] = Vector{ComplexF64}(
+        getsubdict!(coefficients, 0)[(NO, Sleaf)] = Vector{ComplexF64}(
             undef, size(Q[Sleaf])[1]
         )
-        @views mul!(coefficients[0][NO, Sleaf], Q[Sleaf], v[srcvals])
+        @views mul!(coefficients[0][(NO, Sleaf)], Q[Sleaf], v[srcvals])
     end
 
     # Step 2: Sequentially apply R factors
@@ -59,8 +59,7 @@ function apply_BF(Butterfly::BF, v::Vector{ComplexF64})
     # ------------------------------------------------------------
     # Final assembly
     # ------------------------------------------------------------
-    rootvals = values(testT, H2Trees.root(testT))
-    result = zeros(ComplexF64, length(rootvals))
+    result = zeros(ComplexF64, Butterfly.dim[1])
     for Oleaf in keys(P)
         inds = PermP[Oleaf]  # Get the permuted observer indices for this leaf
         dest = @view result[inds]
@@ -78,19 +77,17 @@ end
     return nothing
 end
 
-function applyBF_Mats(t::BF_Mats, v::Vector{ComplexF64})
-    y = v[t.PermQ]  #permute input vector according to Q blocks
+function applyBF_Mats(t::BF_Mats, v::AbstractVector{ComplexF64})
+    y = v  #permute input vector according to Q blocks
     y = t.Q * y
     for R_block in t.R
         y = R_block * y
     end
     y = t.P * y
-    y_out = zeros(ComplexF64, length(v))
-    y_out[t.PermP] = y  #permute output vector according to P blocks
-    return y_out
+    return y
 end
 
-function applyBF_Mats_adjoint(t::BF_Mats, v::Vector{ComplexF64})
+function applyBF_Mats_adjoint(t::BF_Mats, v::AbstractVector{ComplexF64})
     # Gather input using the observer permutation
     y = v[t.PermP]
 
@@ -106,7 +103,7 @@ function applyBF_Mats_adjoint(t::BF_Mats, v::Vector{ComplexF64})
     y = t.Q' * y
 
     # Scatter output to the correct geometric source coordinates
-    y_out = zeros(ComplexF64, length(v))
+    y_out = zeros(ComplexF64, size(t, 1))
     y_out[t.PermQ] = y
 
     return y_out

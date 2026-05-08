@@ -1,8 +1,37 @@
 abstract type Abstractcompressor end
 
+"""
+    PartialQR <: Abstractcompressor
+
+A type representing the Partial QR compression strategy for low-rank approximations.
+"""
+
 struct PartialQR <: Abstractcompressor
     PartialQR() = new()
 end
+
+"""
+    (t::PartialQR)(farassembler, src_index, obs_index, n_otilde, ε)
+
+Executes a low-rank approximation of a matrix block using a Partial Pivoted QR decomposition.
+
+To avoid assembling the full dense matrix, this functor randomly samples `n_otilde` rows
+from the observer space and evaluates only those interactions against the full source space.
+A pivoted QR decomposition is then applied to find a basis and an active set of column indices
+(the "skeleton").
+
+**Arguments:**
+- `farassembler`: A function that assembles entries of the interaction matrix.
+- `src_index`: Vector of global indices for the source (trial) cluster.
+- `obs_index`: Vector of global indices for the observer (test) cluster.
+- `n_otilde`: The number of rows to sample randomly.
+- `ε`: The relative tolerance used to determine the rank truncation.
+
+**Returns:**
+- `tmp`: The compressed coefficient matrix (size `r × n_src`).
+- `k`: The optimal skeleton of source indices selected by the pivot strategy.
+- `r`: The estimated mathematical rank of the block.
+"""
 
 function (t::PartialQR)(
     farassembler, src_index::Vector{Int}, obs_index::Vector{Int}, n_otilde::Int, ε::Float64
@@ -45,6 +74,31 @@ function (t::PartialQR)(
 
     return tmp, k, r
 end
+
+"""
+    estimate_rank_3d(k, c_s, c_o, a_s, a_o, ε; kwargs...)
+
+Estimates the necessary rank of interaction between a source and an observer bounding box
+in 3D space to maintain a given tolerance `ε`.
+
+The formula combines a geometric separation estimate based on the physical sizes and
+distances of the bounding boxes, augmented by an algebraic padding term derived from the
+desired precision.
+
+**Arguments:**
+- `k`: Wavenumber of the physical problem.
+- `c_s`, `c_o`: Centers of the source and observer clusters (SVector).
+- `a_s`, `a_o`: Half-sizes (radii) of the source and observer clusters.
+- `ε`: Desired precision tolerance.
+
+**Keyword Arguments:**
+- `C`: Scaling factor for the geometric rank term (default: 1.0).
+- `Cε`: Scaling factor for the tolerance padding term (default: 3.0).
+- `Rmin`: Minimum allowable rank (default: 5).
+
+**Returns:**
+An `Int` representing the conservatively estimated rank `r` for the block.
+"""
 
 function estimate_rank_3d(
     k,

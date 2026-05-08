@@ -1,10 +1,10 @@
-function Base.adjoint(B::BF)
+function Base.adjoint(B::ButterflyFactorization.BF)
     R_adj = Vector{Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}}(
-        undef, B.level
+        undef, length(B.R)
     )
 
     for l in eachindex(B.R)
-        newl = B.level - l + 1
+        newl = length(B.R) - l + 1
         R_adj[newl] = Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}()
         for nodeS in keys(B.R[l])
             for nodeO in keys(B.R[l][nodeS])
@@ -29,27 +29,17 @@ function Base.adjoint(B::BF)
     end
 
     return BF(
-        P_adj,
-        R_adj,
-        Q_adj,
-        B.PermP,
-        B.PermQ,
-        (B.dim[2], B.dim[1]),
-        B.level,
-        B.NO,
-        B.NS,
-        B.k,
-        B.τ,
+        P_adj, R_adj, Q_adj, B.PermP, B.PermQ, (B.dim[2], B.dim[1]), B.NO, B.NS, B.k, B.τ
     )
 end
 
-function Base.transpose(B::BF)
+function Base.transpose(B::ButterflyFactorization.BF)
     R_tr = Vector{Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}}(
-        undef, B.level
+        undef, length(B.R)
     )
 
     for l in eachindex(B.R)
-        newl = B.level - l + 1
+        newl = length(B.R) - l + 1
         R_tr[newl] = Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}()
         for nodeS in keys(B.R[l])
             for nodeO in keys(B.R[l][nodeS])
@@ -76,21 +66,11 @@ function Base.transpose(B::BF)
     end
 
     return BF(
-        P_tr,
-        R_tr,
-        Q_tr,
-        B.PermP,
-        B.PermQ,
-        (B.dim[2], B.dim[1]),
-        B.level,
-        B.NO,
-        B.NS,
-        B.k,
-        B.τ,
+        P_tr, R_tr, Q_tr, B.PermP, B.PermQ, (B.dim[2], B.dim[1]), B.NO, B.NS, B.k, B.τ
     )
 end
 
-function Base.adjoint(t::BF_Mats)
+function Base.adjoint(t::ButterflyFactorization.BF_Mats)
     return BF_Mats(
         t.P',                                                      # Q becomes P'
         AbstractMatrix{ComplexF64}[r' for r in Iterators.reverse(t.R)], # Reverse and map R
@@ -104,7 +84,7 @@ function Base.adjoint(t::BF_Mats)
     )
 end
 
-function Base.transpose(t::BF_Mats)
+function Base.transpose(t::ButterflyFactorization.BF_Mats)
     return BF_Mats(
         transpose(t.P),
         AbstractMatrix{ComplexF64}[transpose(r) for r in Iterators.reverse(t.R)],
@@ -118,7 +98,7 @@ function Base.transpose(t::BF_Mats)
     )
 end
 
-function Base.adjoint(B::AlgBF)
+function Base.adjoint(B::ButterflyFactorization.AlgBF)
     lr = length(B.R)
     R_adj = Vector{Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}}(
         undef, lr
@@ -150,7 +130,7 @@ function Base.adjoint(B::AlgBF)
     return AlgBF(reverse(B.dim), P_adj, R_adj, Q_adj)
 end
 
-function Base.transpose(B::AlgBF)
+function Base.transpose(B::ButterflyFactorization.AlgBF)
     lr = length(B.R)
     R_adj = Vector{Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}}(
         undef, lr

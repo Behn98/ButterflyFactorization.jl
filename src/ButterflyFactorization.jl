@@ -19,6 +19,7 @@ include("kernelmatrix/beastkernelmatrix.jl")
 
 #Butterfly algebra --> any Block related functions
 include("Butterflyalgebra/bfstructs.jl")
+include("Butterflyalgebra/bfadjtr.jl")
 include("Butterflyalgebra/bfdims.jl")
 include("Butterflyalgebra/bfvector.jl")
 include("Butterflyalgebra/bfmatrix.jl")

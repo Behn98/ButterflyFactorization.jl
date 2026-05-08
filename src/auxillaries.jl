@@ -1,9 +1,16 @@
 """
-The auxillaries file contains helper functions that are used across multiple parts in the
-ButterflyFactorization package. The blockdiag function Constructs a block diagonal matrix
-from the given matrices. Each input matrix is placed on the diagonal, and the off-diagonal
-blocks are filled with zeros. The resulting matrix has dimensions equal to the sum of the
-dimensions of the input matrices.
+    blockdiag(blocks::AbstractMatrix...)
+
+Constructs a block diagonal dense matrix from the given `blocks`.
+
+Each input matrix is placed on the diagonal, and the off-diagonal blocks are filled with zeros.
+The resulting matrix has dimensions equal to the sum of the dimensions of the input matrices.
+
+**Arguments:**
+- `blocks`: A variable number of dense matrices (`AbstractMatrix`).
+
+**Returns:**
+- A single dense matrix `M` containing the block diagonal combination.
 """
 
 function blockdiag(blocks::AbstractMatrix...)
@@ -29,9 +36,18 @@ function blockdiag(blocks::AbstractMatrix...)
 end
 
 """
-Constructs a block diagonal sparse matrix from the given matrices. Each input matrix is
-placed on the diagonal, and the off-diagonal blocks are filled with zeros. The resulting
-sparse matrix has dimensions equal to the sum of the dimensions of the input matrices.
+    sparse_blockdiag(blocks::AbstractMatrix...)
+
+Constructs a block diagonal sparse matrix from the given `blocks`.
+
+Each input matrix is converted to a sparse matrix and placed on the diagonal,
+with off-diagonal blocks remaining empty (structural zeros).
+
+**Arguments:**
+- `blocks`: A variable number of matrices (`AbstractMatrix`).
+
+**Returns:**
+- A `SparseMatrixCSC` encompassing all input blocks diagonally.
 """
 
 function sparse_blockdiag(blocks::AbstractMatrix...)
@@ -43,9 +59,17 @@ function sparse_blockdiag(blocks::AbstractMatrix...)
 end
 
 """
-Vertically concatenates the given matrices. Each input matrix is stacked on top of the next,
-resulting in a matrix with the same number of columns as the input matrices and a number of
-rows equal to the sum of the rows of the input matrices.
+    sparse_vcat(blocks::AbstractMatrix...)
+
+Vertically concatenates the given `blocks` into a sparse matrix.
+
+Each input matrix is stacked on top of the next. All blocks must have the same number of columns.
+
+**Arguments:**
+- `blocks`: A variable number of matrices (`AbstractMatrix`).
+
+**Returns:**
+- A `SparseMatrixCSC` resulting from the vertical stack.
 """
 
 function sparse_vcat(blocks::AbstractMatrix...)
@@ -57,9 +81,19 @@ function sparse_vcat(blocks::AbstractMatrix...)
 end
 
 """
-This Function constructs a block diagonal matrix from the given blocks, which can be either
-regular matrices or BlockSparseMatrix instances. It handles the combination of row and
-column indices appropriately to maintain the structure of the resulting BlockSparseMatrix.
+    blocksparse_blockdiag(blocks...)
+
+Constructs a block diagonal matrix specifically handling `BlockSparseMatrix` instances.
+
+This function extends the standard block diagonal logic to keep track of the internal
+row and column indices essential for the `BlockSparseMatrix` custom type, allowing
+seamless combination of both regular matrices and block-sparse matrices.
+
+**Arguments:**
+- `blocks`: Variables number of regular `Matrix` or `BlockSparseMatrix` objects.
+
+**Returns:**
+- A well-formed `BlockSparseMatrix` representing the block diagonal.
 """
 
 function blocksparse_blockdiag(blocks...)
@@ -95,10 +129,19 @@ function blocksparse_blockdiag(blocks...)
 end
 
 """
-This function vertically concatenates the given blocks, which can be either regular matrices
-or BlockSparseMatrix instances. It ensures that the resulting BlockSparseMatrix maintains
-the correct structure by appropriately combining the row indices while keeping the column
-indices consistent across the blocks.
+    blocksparse_vcat(blocks...)
+
+Vertically concatenates regular matrices and `BlockSparseMatrix` instances.
+
+It ensures that the resulting `BlockSparseMatrix` maintains the correct structure
+by appropriately combining the row indices while keeping the column indices
+consistent across the blocks.
+
+**Arguments:**
+- `blocks`: Variables number of regular `Matrix` or `BlockSparseMatrix` objects.
+
+**Returns:**
+- A vertically concatenated `BlockSparseMatrix`.
 """
 
 function blocksparse_vcat(blocks...)
@@ -132,22 +175,20 @@ function blocksparse_vcat(blocks...)
 end
 
 """
-This function retrieves a sub-dictionary from a nested dictionary structure. If the
-specified key does not exist in the outer dictionary, it initializes a new inner dictionary
-at that key and returns it. This is useful for building up nested dictionaries without
-having to check for the existence of keys at each level.
+    getsubdict!(D, k)
+
+Retrieves a sub-dictionary from a nested dictionary `D` at key `k`.
+
+If the specified key does not exist in the outer dictionary, it initializes
+a new empty inner dictionary at that key and returns it. This allows for safe,
+on-the-fly construction of nested dictionaries like those used for `Q`, `R`, and `P` factors.
 """
+
 @inline function getsubdict!(D::Dict{Int,Dict{Int,T}}, k::Int) where {T}
     get!(D, k) do
         Dict{Int,T}()
     end
 end
-
-"""
-The same as the previous function but for a different type of nested dictionary structure
-wherethe keys are tuples of integers. This allows for more complex indexing schemes in the
-nested dictionaries
-"""
 
 @inline function getsubdict!(
     D::Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},T}}, k::Tuple{Int,Int}
@@ -157,12 +198,26 @@ nested dictionaries
     end
 end
 
+@inline function getsubdict!(D::Dict{Int,Dict{Tuple{Int,Int},T}}, k::Int) where {T}
+    get!(D, k) do
+        Dict{Tuple{Int,Int},T}()
+    end
+end
+
 """
-This simply finds all the rows in a nested dictionary structure where the inner dictionary
-contains a specific column index. It iterates through the outer dictionary, checks if the
-inner dictionary has the specified column index as a key, and collects the corresponding row
-keys into a vector. This is useful for operations that need to identify which rows are
-associated with a given column in the context of the ButterflyFactorization's R factors.
+    find_rows_for_column(R, col_idx)
+
+Finds all the row keys in a nested dictionary `R` where the inner dictionary contains a specific `col_idx`.
+
+This is highly useful for operations that need to invert the relationships in the observer/source
+tree indices stored within the ButterflyFactorization's hierarchical `R` factors.
+
+**Arguments:**
+- `R`: The nested dictionary representing the `R` factor block.
+- `col_idx`: The column target key to search for.
+
+**Returns:**
+- A `Vector` of row keys that map to the given column index.
 """
 
 function find_rows_for_column(R::Dict{T,Dict{T,U}}, col_idx::T) where {T,U}
@@ -176,11 +231,15 @@ function find_rows_for_column(R::Dict{T,Dict{T,U}}, col_idx::T) where {T,U}
 end
 
 """
-This function computes the levels of a hierarchical tree structure (H2Trees.TwoNTree)
-starting from a specified root node. It traverses the tree level by level, collecting the
-nodes at each level into a vector of vectors. The function uses the isleaf and children
-functions from the H2Trees package to determine if a node is a leaf and to retrieve its
-children, respectively.
+    h2treelevels(tree, root)
+
+Computes the breath-first hierarchical levels of an `H2Trees.TwoNTree`.
+
+Starting from a specified `root` node, it traverses the tree level by level,
+collecting the nodes at each depth.
+
+**Returns:**
+- A `Vector{Vector{Int}}` where each inner vector represents the node IDs at that level.
 """
 
 function h2treelevels(tree::T, root::Int64) where {T}
@@ -207,17 +266,21 @@ function h2treelevels(tree::T, root::Int64) where {T}
 end
 
 """
-The Butterfly logic enforces, that the all physical DoFs are related alone to the Q and P
-factors, and that the R factors only contain the "artificial" DoFs that are introduced by
-the hierarchical structure of the trees. This function traverses the tree levels and creates
-ghost nodes for any leaves that are present at a level above leaf level. This ensures that
-the R factors only contain the artificial DoFs and that the physical DoFs are correctly
-associated with the Q and P factors. Also it ensures that skeletons are computed first with
-respect to the observer root before travelling downward,while also ensuring that they reach
-the source root just at the same time as the leaf level of the observer tree. This is
-important for the correct construction of the ButterflyFactorization, as it maintains the
-necessary structure and relationships between the test and trial spaces as defined by the
-Trees.
+    traverseandpad(H2tree, root)
+
+Extracts the hierarchical levels of a tree and generates "virtual" ghost nodes.
+
+The Butterfly logic enforces that physical Degrees of Freedom (DoFs) belong solely to the
+`Q` and `P` factors, while `R` factors handle hierarchical rank-transfers. To maintain
+a perfectly balanced structure in unbalanced trees, this function artificially pushes
+shallow leaf nodes down to the maximum depth of the tree block.
+
+**Arguments:**
+- `H2tree`: The hierarchical block tree.
+- `root`: The ID of the root node to traverse from.
+
+**Returns:**
+- A `Vector{Vector{Int}}` representing the padded tree nodes per level.
 """
 
 function traverseandpad(H2tree::T, root::Int64) where {T}
@@ -234,18 +297,20 @@ function traverseandpad(H2tree::T, root::Int64) where {T}
 end
 
 """
-Here we define two styles for ordering the spaces in the H2Trees. The PermuteSpaceInPlace
-style permutes the test and trial spaces in place according to the permutation derived from
-the tree structure, while the PreserveSpaceOrder style leaves the spaces unchanged. The
-choice of style can affect the performance of the ButterflyFactorization, as certain
-orderings may lead to more efficient computations. The functions associated with each style
-take the tree and the test and trial spaces as input and perform the necessary permutations
-or leave them as is.
+Abstract base type defining how physical spaces inside the `H2Trees` are ordered.
 """
 
 permute(space, perm) = permute!(copy(space), perm)
 
 abstract type SpaceOrderingStyle end
+
+"""
+    PermuteSpaceInPlace()
+
+A `SpaceOrderingStyle` that permutes the test and trial spaces in place
+according to the permutation derived from the tree leaf structure.
+"""
+
 struct PermuteSpaceInPlace <: SpaceOrderingStyle end
 function (::PermuteSpaceInPlace)(tree, testspace, trialspace)
     testperm = permutation(testtree(tree))

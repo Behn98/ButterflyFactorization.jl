@@ -3,16 +3,17 @@
 ) where {T}
     LinearMaps.check_dim_mul(y, A, x)
     fill!(y, zero(T))
-    y += A.nearinteractions * x
+    y .+= A.nearinteractions * x
     i = 1
     for (NO, source_nodes) in A.farinteractions
         for NS in source_nodes
-            y += apply_BF(A.BFs[i], x)
+            gs = H2Trees.values(A.tree.trialcluster, A.BFs[i].NS)
+            go = H2Trees.values(A.tree.testcluster, A.BFs[i].NO)
+            y[go] .+= apply_BF(A.BFs[i], x[gs])
             i += 1
         end
     end
-
-    return y
+    return nothing
 end
 
 @views function LinearAlgebra.mul!(
@@ -22,11 +23,13 @@ end
 ) where {T}
     LinearMaps.check_dim_mul(y, At.lmap, x)
     fill!(y, zero(T))
-    y += transpose(At.lmap.nearinteractions) * x
+    y .+= transpose(At.lmap.nearinteractions) * x
     for i in eachindex(At.lmap.BFs)
-        y += apply_BF(transpose(At.lmap.BFs[i]), x)
+        gs = H2Trees.values(At.lmap.tree.trialcluster, A.BFs[i].NS)
+        go = H2Trees.values(At.lmap.tree.testcluster, A.BFs[i].NO)
+        y[go] .+= apply_BF(transpose(At.lmap.BFs[i]), x[gs])
     end
-    return y
+    return nothing
 end
 
 @views function LinearAlgebra.mul!(
@@ -36,11 +39,13 @@ end
 ) where {T}
     LinearMaps.check_dim_mul(y, At.lmap, x)
     fill!(y, zero(T))
-    y += adjoint(At.lmap.nearinteractions) * x
+    y .+= adjoint(At.lmap.nearinteractions) * x
     for i in eachindex(At.lmap.BFs)
-        y += apply_BF(At.lmap.BFs[i]', x)
+        gs = H2Trees.values(At.lmap.tree.trialcluster, A.BFs[i].NS)
+        go = H2Trees.values(At.lmap.tree.testcluster, A.BFs[i].NO)
+        y[go] .+= apply_BF(At.lmap.BFs[i]', x[gs])
     end
-    return y
+    return nothing
 end
 
 @views function LinearAlgebra.mul!(
@@ -50,12 +55,12 @@ end
 ) where {T}
     LinearMaps.check_dim_mul(y, A, x)
     fill!(y, zero(T))
-    y += A.nearinteractions * x
+    y .+= A.nearinteractions * x
     i = 1
     for i in eachindex(A.BFs)
-        y += applyBF_Mats(A.BFs[i], x)
+        y[A.BFs[i].PermP] .+= applyBF_Mats(A.BFs[i], x[A.BFs[i].PermQ])
     end
-    return y
+    return nothing
 end
 
 @views function LinearAlgebra.mul!(
@@ -65,11 +70,11 @@ end
 ) where {T}
     LinearMaps.check_dim_mul(y, At.lmap, x)
     fill!(y, zero(T))
-    y += transpose(At.lmap.nearinteractions) * x
+    y .+= transpose(At.lmap.nearinteractions) * x
     for i in eachindex(At.lmap.BFs)
         y += applyBF_Mats(transpose(At.lmap.BFs[i]), x)
     end
-    return y
+    return nothing
 end
 
 @views function LinearAlgebra.mul!(
@@ -79,9 +84,9 @@ end
 ) where {T}
     LinearMaps.check_dim_mul(y, At.lmap, x)
     fill!(y, zero(T))
-    y += adjoint(At.lmap.nearinteractions) * x
+    y .+= adjoint(At.lmap.nearinteractions) * x
     for i in eachindex(At.lmap.BFs)
-        y += applyBF_Mats(At.lmap.BFs[i]', x)
+        y .+= applyBF_Mats(At.lmap.BFs[i]', x)
     end
-    return y
+    return nothing
 end

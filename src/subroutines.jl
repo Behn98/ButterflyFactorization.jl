@@ -1,34 +1,26 @@
 """
-The subroutines are the core for producing the butterfly factorization. They produce the Q,
-R and P blocks as well as the permutations of the source and observer indices for the Q and
-P blocks, which are needed for the correct MV products without saving the tree explicitly.
-NO and NS are the IDs of the root nodes related by the Butterfly. The subroutine_BF produces
-the Butterfly in a dictionary format, which is more intuitive and easier to debug. The
-subroutine_BF_mats produces the Butterfly in a matrix format, which is more efficient for MV
-products. The Compressor argument allows for different compression schemes to be used, with
-the default being a partial QR decomposition. Note that the kernelmatrix is a function that
-computes the matrix entries for given row and column indices, and is used in the compression
-step to compute the low-rank approximations of the blocks. The subroutines traverse the H2
-tree structure to compute the necessary blocks for the Butterfly factorization, starting
-from the leaf level and moving up to the root of the source/trial tree and to the leafs of
-the observer/test tree, while keeping track of the necessary permutations and unions of
-skeletons. Be aware that also the wavenumber k plays a crucial role in the estimation of the
-ranks and thus in the overall performance of the factorization. In terms of memory
-efficiency, the matrices turn out to be less efficient than the dicitionaries, due to the
-necessary overhead of saving the nonzero entry indices in the sparse/block-sparse format,
-which is not needed in the dictionary format. However, the matrix format allows for much
-faster MV products as well as providing a visualization of the structure of the Butterfly,
-which can be helpful for debugging and understanding the factorization. The choice between
-the two formats depends on the specific use case and requirements of the application.
-Algebraic operations on the Butterfly factorization, such as addition and multiplication,
-can be implemented using the dictionary format, as it allows for more flexible manipulation
-of the blocks and their indices. The matrix format can be used for efficient application of
-the Butterfly to vectors, but may not be as convenient for algebraic operations that require
-access to individual blocks. Overall, the subroutines provide a way to construct the
-Butterfly factorization from the H2 tree structure and the kernel matrix, with flexibility
-in the choice of compression scheme and output format. Additionally unbalanced trees are
-supported just as well as trees of different height. this allows for more efficiency when
-compressing farinteractions.
+    subroutine_BF(kernelmatrix, H2Blocktree, NO, NS, k, τ; Compressor=PartialQR())
+
+Constructs the Butterfly Factorization for a given block in a **dictionary format**.
+
+This subroutine traverses the H2 tree structure from the leaf level moving up to the root
+of the source tree, and to the leaves of the observer tree. It computes the low-rank
+approximations to build the `Q`, `R`, and `P` factors as dictionaries. It also maps the
+necessary index permutations to allow for correct, independent Matrix-Vector (MV)
+products without permanently storing the tree.
+
+**Arguments:**
+- `kernelmatrix`: Function computing matrix entries for specified row/column indices.
+- `H2Blocktree`: The paired source-observer tree structure.
+- `NO`, `NS`: The root IDs of the observer (test) and source (trial) spaces.
+- `k`, `τ`: Wavenumber (crucial for rank estimation) and precision tolerance.
+- `Compressor`: Compression scheme for low-rank blocks (default: `PartialQR`).
+
+**Why Dictionary format?**
+It is extremely memory efficient because it avoids the overhead of saving nonzero entry
+indices required by sparse matrices. It is deeply intuitive, makes algebraic manipulation
+(like butterfly multiplication or summation) flexible, and handles unbalanced trees
+perfectly.
 """
 
 function subroutine_BF(
@@ -45,6 +37,7 @@ function subroutine_BF(
     Q = Dict{Int,Matrix{ComplexF64}}()
     K = Dict{Int,Dict{Int,Vector{Int}}}()
     U = Dict{Int,Dict{Int,Vector{Int}}}()   #temporary unions
+
     PermQ = Dict{Int,Vector{Int}}()
     PermP = Dict{Int,Vector{Int}}()
     # --- trees & helpers ---
@@ -65,6 +58,13 @@ function subroutine_BF(
     R = Vector{Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}}(
         undef, L - 1
     )
+    # 1. Get all global indices for this block's source/observer trees
+    global_src_indices = values(trialT, NS) # All sources for this block
+    global_obs_indices = values(testT, NO)  # All observers for this block
+
+    # 2. Create a mapping from global to local (1 to N)
+    src_map = Dict(g => l for (l, g) in enumerate(global_src_indices))
+    obs_map = Dict(g => l for (l, g) in enumerate(global_obs_indices))
 
     # ------------------------------------------------------------------
     # Leaf-level Q
@@ -77,7 +77,8 @@ function subroutine_BF(
         c_o = center(testT, NO)
         a_s = halfsize(trialT, Sleaf)
         a_o = halfsize(testT, NO)
-        PermQ[Sleaf] = srcindex
+        #PermQ[Sleaf] = srcindex
+        PermQ[Sleaf] = [src_map[g] for g in srcindex]
         n_otilde = estimate_rank_3d(k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3)
         q_ks, k_l, r_l = Compressor(kernelmatrix, srcindex, obsindex, n_otilde, τ)
 
@@ -173,13 +174,7 @@ function subroutine_BF(
                             kernelmatrix, srcindex, obsindex, n_otilde, τ
                         )
                         last = 0
-                        for Schild in children(trialT, Svert)
-                            ks = length(getsubdict!(K, Schild)[Overt])
-                            getsubdict!(R[l], (Ochild, Svert))[(Overt, Schild)] = q_ks[
-                                :, (last + 1):(last + ks)
-                            ]
-                            last += ks
-                        end
+                        getsubdict!(R[l], (Ochild, Svert))[(Overt, Svert)] = q_ks
                         getsubdict!(K, Svert)[Ochild] = k_l
                     end
                 end
@@ -231,7 +226,8 @@ function subroutine_BF(
 
         Z = zeros(ComplexF64, length(row), length(col))
         kernelmatrix(Z, row, col)
-        PermP[Oleaf] = row
+        #PermP[Oleaf] = row
+        PermP[Oleaf] = [obs_map[g] for g in row]
         P[Oleaf] = Z
     end
     return BF(
@@ -240,13 +236,30 @@ function subroutine_BF(
         P,
         PermQ,
         PermP,
-        (length(values(testT, NO)), length(values(trialT, NS))),
+        (length(global_obs_indices), length(global_src_indices)),
         NS,
         NO,
         k,
         τ,
     )
 end
+
+"""
+    subroutine_BF_mats(kernelmatrix, H2Blocktree, NO, NS, k, τ; Compressor=PartialQR())
+
+Constructs the Butterfly Factorization for a given block in a **sparse matrix format**.
+
+Similar to `subroutine_BF`, it traverses the H2 tree structure to compute the `Q`, `R`,
+and `P` factors, but specifically pieces them together into sparse block-diagonal matrices.
+It also returns single continuous permutation vectors (`PermP`, `PermQ`) to map
+interactions across the entire space.
+
+**Why Matrix format?**
+While slightly less memory efficient than the dictionary format (due to sparsity tracking
+overhead), it allows for dramatically faster direct Matrix-Vector applications using
+standard linear algebra methods. It also provides a clear visual and algebraic
+representation of the overall block structure, which is invaluable for debugging.
+"""
 
 function subroutine_BF_mats(
     kernelmatrix,
