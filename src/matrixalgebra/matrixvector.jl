@@ -13,9 +13,9 @@
             i += 1
         end
     end
-    return nothing
+    return y
 end
-
+# ...existing code...
 @views function LinearAlgebra.mul!(
     y::AbstractVecOrMat,
     At::LinearMaps.TransposeMap{<:Any,<:ButterflyFactorization.PetrovGalerkinBF},
@@ -25,11 +25,12 @@ end
     fill!(y, zero(T))
     y .+= transpose(At.lmap.nearinteractions) * x
     for i in eachindex(At.lmap.BFs)
-        gs = H2Trees.values(At.lmap.tree.trialcluster, A.BFs[i].NS)
-        go = H2Trees.values(At.lmap.tree.testcluster, A.BFs[i].NO)
-        y[go] .+= apply_BF(transpose(At.lmap.BFs[i]), x[gs])
+        gs = H2Trees.values(At.lmap.tree.trialcluster, At.lmap.BFs[i].NS)
+        go = H2Trees.values(At.lmap.tree.testcluster, At.lmap.BFs[i].NO)
+
+        y[gs] .+= apply_BF(transpose(At.lmap.BFs[i]), x[go])
     end
-    return nothing
+    return y
 end
 
 @views function LinearAlgebra.mul!(
@@ -41,11 +42,12 @@ end
     fill!(y, zero(T))
     y .+= adjoint(At.lmap.nearinteractions) * x
     for i in eachindex(At.lmap.BFs)
-        gs = H2Trees.values(At.lmap.tree.trialcluster, A.BFs[i].NS)
-        go = H2Trees.values(At.lmap.tree.testcluster, A.BFs[i].NO)
-        y[go] .+= apply_BF(At.lmap.BFs[i]', x[gs])
+        gs = H2Trees.values(At.lmap.tree.trialcluster, At.lmap.BFs[i].NS)
+        go = H2Trees.values(At.lmap.tree.testcluster, At.lmap.BFs[i].NO)
+
+        y[gs] .+= apply_BF(At.lmap.BFs[i]', x[go])  # OBS: Använd din apply_BF_adjoint funktion här!
     end
-    return nothing
+    return y
 end
 
 @views function LinearAlgebra.mul!(
@@ -56,11 +58,11 @@ end
     LinearMaps.check_dim_mul(y, A, x)
     fill!(y, zero(T))
     y .+= A.nearinteractions * x
-    i = 1
+
     for i in eachindex(A.BFs)
         y[A.BFs[i].PermP] .+= applyBF_Mats(A.BFs[i], x[A.BFs[i].PermQ])
     end
-    return nothing
+    return y
 end
 
 @views function LinearAlgebra.mul!(
@@ -72,9 +74,11 @@ end
     fill!(y, zero(T))
     y .+= transpose(At.lmap.nearinteractions) * x
     for i in eachindex(At.lmap.BFs)
-        y += applyBF_Mats(transpose(At.lmap.BFs[i]), x)
+        y[At.lmap.BFs[i].PermQ] .+= applyBF_Mats(
+            transpose(At.lmap.BFs[i]), x[At.lmap.BFs[i].PermP]
+        )
     end
-    return nothing
+    return y
 end
 
 @views function LinearAlgebra.mul!(
@@ -86,7 +90,7 @@ end
     fill!(y, zero(T))
     y .+= adjoint(At.lmap.nearinteractions) * x
     for i in eachindex(At.lmap.BFs)
-        y .+= applyBF_Mats(At.lmap.BFs[i]', x)
+        y[At.lmap.BFs[i].PermQ] .+= applyBF_Mats(At.lmap.BFs[i]', x[At.lmap.BFs[i].PermP])
     end
-    return nothing
+    return y
 end

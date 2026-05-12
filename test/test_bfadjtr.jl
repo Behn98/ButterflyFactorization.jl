@@ -1,4 +1,4 @@
-@testitem "Testing Addition of Butterflies" begin
+@testitem "Testing Adjoint and Transposed Butterflies" begin
     using Test
     using H2Trees
     using CompScienceMeshes
@@ -6,13 +6,13 @@
     using ButterflyFactorization
     using StaticArrays
     using LinearAlgebra
+    using ParallelKMeans
 
     #========================================================================
     =========================================================================
                             Geometry and Operators
     =========================================================================
     =========================================================================#
-
     lambda = 1.0
     k = 2 * pi / lambda
     x = meshsphere(1.0, lambda / 10)
@@ -24,7 +24,10 @@
     U = raviartthomas(y)
     T2 = raviartthomas(x2)
     U2 = raviartthomas(y2)
+    length(T)
+    length(T2)
 
+    ##
     #========================================================================
     =========================================================================
                     Tree construction  and Kernelmatrix assembly
@@ -75,19 +78,23 @@
                         Assembly of Matrices and Vectors
     =========================================================================
     =========================================================================#
-
-    A1 = assemble(op, T, U)
-    A2 = assemble(op, U, T)
-    A3 = assemble(op, U2, T)
-    A4 = assemble(op, U, T2)
+    @time A1 = assemble(op, T, U)
+    @time A2 = assemble(op, U, T)
+    @time A3 = assemble(op, U2, T)
+    @time A4 = assemble(op, U, T2)
 
     x_t = randn(ComplexF64, length(T))
     x_t2 = randn(ComplexF64, length(T2))
 
-    x_s1 = (A1 + A1) * x_t
-    x_s2 = (A2 + A2) * x_t
-    x_s3 = (A3 + A3) * x_t
-    x_s4 = (A4 + A4) * x_t2
+    x_s1a = A1' * x_t
+    x_s2a = A2' * x_t
+    x_s3a = A3' * x_t2
+    x_s4a = A4' * x_t
+
+    x_s1t = transpose(A1) * x_t
+    x_s2t = transpose(A2) * x_t
+    x_s3t = transpose(A3) * x_t2
+    x_s4t = transpose(A4) * x_t
 
     #========================================================================
     =========================================================================
@@ -95,28 +102,66 @@
     =========================================================================
     =========================================================================#
 
-    Bfly1 = ButterflyFactorization.subroutine_BF(farassembler1, tree1, 1, 1, k, 10^(-4))
-    Bfly2 = ButterflyFactorization.subroutine_BF(farassembler2, tree2, 1, 1, k, 10^(-4))
-    Bfly3 = ButterflyFactorization.subroutine_BF(farassembler3, tree3, 1, 1, k, 10^(-4))
-    Bfly4 = ButterflyFactorization.subroutine_BF(farassembler4, tree4, 1, 1, k, 10^(-4))
+    Bfly1 = ButterflyFactorization.subroutine_BF(farassembler1, tree1, 1, 1, k, 10^(-3))
+    Bfly2 = ButterflyFactorization.subroutine_BF(farassembler2, tree2, 1, 1, k, 10^(-3))
+    Bfly3 = ButterflyFactorization.subroutine_BF(farassembler3, tree3, 1, 1, k, 10^(-3))
+    Bfly4 = ButterflyFactorization.subroutine_BF(farassembler4, tree4, 1, 1, k, 10^(-3))
 
-    Bfly1A = ButterflyFactorization.add_eqbfs(Bfly1, Bfly1, 10^-3)
-    Bfly2A = ButterflyFactorization.add_eqbfs(Bfly2, Bfly2, 10^-3)
-    Bfly3A = ButterflyFactorization.add_eqbfs(Bfly3, Bfly3, 10^-3)
-    Bfly4A = ButterflyFactorization.add_eqbfs(Bfly4, Bfly4, 10^-3)
+    Bfly1m = ButterflyFactorization.subroutine_BF_mats(
+        farassembler1, tree1, 1, 1, k, 10^(-3)
+    )
+    Bfly2m = ButterflyFactorization.subroutine_BF_mats(
+        farassembler2, tree2, 1, 1, k, 10^(-3)
+    )
+    Bfly3m = ButterflyFactorization.subroutine_BF_mats(
+        farassembler3, tree3, 1, 1, k, 10^(-3)
+    )
+    Bfly4m = ButterflyFactorization.subroutine_BF_mats(
+        farassembler4, tree4, 1, 1, k, 10^(-3)
+    )
 
-    x_bfly1 = zeros(ComplexF64, size(Bfly1, 1))
-    x_bfly2 = zeros(ComplexF64, size(Bfly2, 1))
-    x_bfly3 = zeros(ComplexF64, size(Bfly3, 1))
-    x_bfly4 = zeros(ComplexF64, size(Bfly4, 1))
+    x_test1 = zeros(ComplexF64, size(A1, 2))
+    x_test2 = zeros(ComplexF64, size(A2, 2))
+    x_test3 = zeros(ComplexF64, size(A3, 2))
+    x_test4 = zeros(ComplexF64, size(A4, 2))
 
-    @views mul!(x_bfly1[go1], Bfly1A, x_t[gs1])
-    @views mul!(x_bfly2[go2], Bfly2A, x_t[gs2])
-    @views mul!(x_bfly3[go3], Bfly3A, x_t[gs3])
-    @views mul!(x_bfly4[go4], Bfly4A, x_t2[gs4])
+    @views mul!(x_test1[gs1], Bfly1', x_t[go1])
+    @views mul!(x_test2[gs2], Bfly2', x_t[go2])
+    @views mul!(x_test3[gs3], Bfly3', x_t2[go3])
+    @views mul!(x_test4[gs4], Bfly4', x_t[go4])
 
-    @test norm(x_bfly1 - x_s1) / norm(x_s1) < 10^(-3)
-    @test norm(x_bfly2 - x_s2) / norm(x_s2) < 10^(-3)
-    @test norm(x_bfly3 - x_s3) / norm(x_s3) < 10^(-3)
-    @test norm(x_bfly4 - x_s4) / norm(x_s4) < 10^(-3)
+    @test norm(x_test1 - x_s1a) / norm(x_s1a) < 10^(-2)
+    @test norm(x_test2 - x_s2a) / norm(x_s2a) < 10^(-2)
+    @test norm(x_test3 - x_s3a) / norm(x_s3a) < 10^(-2)
+    @test norm(x_test4 - x_s4a) / norm(x_s4a) < 10^(-2)
+
+    @views mul!(x_test1[Bfly1m'.PermP], Bfly1m', x_t[Bfly1m'.PermQ])
+    @views mul!(x_test2[Bfly2m'.PermP], Bfly2m', x_t[Bfly2m'.PermQ])
+    @views mul!(x_test3[Bfly3m'.PermP], Bfly3m', x_t2[Bfly3m'.PermQ])
+    @views mul!(x_test4[Bfly4m'.PermP], Bfly4m', x_t[Bfly4m'.PermQ])
+
+    @test norm(x_test1 - x_s1a) / norm(x_s1a) < 10^(-2)
+    @test norm(x_test2 - x_s2a) / norm(x_s2a) < 10^(-2)
+    @test norm(x_test3 - x_s3a) / norm(x_s3a) < 10^(-2)
+    @test norm(x_test4 - x_s4a) / norm(x_s4a) < 10^(-2)
+
+    @views mul!(x_test1[gs1], transpose(Bfly1), x_t[go1])
+    @views mul!(x_test2[gs2], transpose(Bfly2), x_t[go2])
+    @views mul!(x_test3[gs3], transpose(Bfly3), x_t2[go3])
+    @views mul!(x_test4[gs4], transpose(Bfly4), x_t[go4])
+
+    @test norm(x_test1 - x_s1t) / norm(x_s1t) < 10^(-2)
+    @test norm(x_test2 - x_s2t) / norm(x_s2t) < 10^(-2)
+    @test norm(x_test3 - x_s3t) / norm(x_s3t) < 10^(-2)
+    @test norm(x_test4 - x_s4t) / norm(x_s4t) < 10^(-2)
+
+    @views mul!(x_test1[Bfly1m.PermQ], transpose(Bfly1m), x_t[Bfly1m.PermP])
+    @views mul!(x_test2[Bfly2m.PermQ], transpose(Bfly2m), x_t[Bfly2m.PermP])
+    @views mul!(x_test3[Bfly3m.PermQ], transpose(Bfly3m), x_t2[Bfly3m.PermP])
+    @views mul!(x_test4[Bfly4m.PermQ], transpose(Bfly4m), x_t[Bfly4m.PermP])
+
+    @test norm(x_test1 - x_s1t) / norm(x_s1t) < 10^(-2)
+    @test norm(x_test2 - x_s2t) / norm(x_s2t) < 10^(-2)
+    @test norm(x_test3 - x_s3t) / norm(x_s3t) < 10^(-2)
+    @test norm(x_test4 - x_s4t) / norm(x_s4t) < 10^(-2)
 end

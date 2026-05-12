@@ -23,8 +23,6 @@
     U = raviartthomas(y)
     T2 = raviartthomas(x2)
     U2 = raviartthomas(y2)
-    length(T)
-    length(T2)
 
     ##
     #========================================================================
@@ -48,39 +46,55 @@
     gs3 = H2Trees.values(tree3.trialcluster, H2Trees.root(tree3.trialcluster))
     gs4 = H2Trees.values(tree4.trialcluster, H2Trees.root(tree4.trialcluster))
 
-    @views farasm = BEAST.blockassembler(op, T, U)
+    farassembler1 = ButterflyFactorization.AbstractKernelMatrix(op, T, U)
+    #=
     @views function farassembler1(Z, tdata, sdata)
         @views store(v, m, n) = (Z[m, n] += v)
-        return farasm(tdata, sdata, store)
-    end
 
-    @views farasm2 = BEAST.blockassembler(op, U, T)
+        # Skapa blockassemblern LOKALT inuti anropet så att den är thread-safe!
+        farasm_local = BEAST.blockassembler(op, T, U)
+        return farasm_local(tdata, sdata, store)
+    end
+    =#
+    farassembler2 = ButterflyFactorization.AbstractKernelMatrix(op, U, T)
+    #=
     @views function farassembler2(Z, tdata, sdata)
         @views store(v, m, n) = (Z[m, n] += v)
-        return farasm2(tdata, sdata, store)
-    end
 
-    @views farasm3 = BEAST.blockassembler(op, U2, T)
+        # Skapa blockassemblern LOKALT inuti anropet så att den är thread-safe!
+        farasm_local = BEAST.blockassembler(op, U, T)
+        return farasm_local(tdata, sdata, store)
+    end
+    =#
+    farassembler3 = ButterflyFactorization.AbstractKernelMatrix(op, U2, T)
+    #=
     @views function farassembler3(Z, tdata, sdata)
         @views store(v, m, n) = (Z[m, n] += v)
-        return farasm3(tdata, sdata, store)
-    end
 
-    @views farasm4 = BEAST.blockassembler(op, U, T2)
+        # Skapa blockassemblern LOKALT inuti anropet så att den är thread-safe!
+        farasm_local = BEAST.blockassembler(op, U2, T)
+        return farasm_local(tdata, sdata, store)
+    end
+    =#
+    farassembler4 = ButterflyFactorization.AbstractKernelMatrix(op, U, T2)
+    #=
     @views function farassembler4(Z, tdata, sdata)
         @views store(v, m, n) = (Z[m, n] += v)
-        return farasm4(tdata, sdata, store)
-    end
 
+        # Skapa blockassemblern LOKALT inuti anropet så att den är thread-safe!
+        farasm_local = BEAST.blockassembler(op, U, T2)
+        return farasm_local(tdata, sdata, store)
+    end
+    =#
     #========================================================================
     =========================================================================
                         Assembly of Matrices and Vectors
     =========================================================================
     =========================================================================#
-    @time A1 = assemble(op, T, U)
-    @time A2 = assemble(op, U, T)
-    @time A3 = assemble(op, U2, T)
-    @time A4 = assemble(op, U, T2)
+    A1 = assemble(op, T, U)
+    A2 = assemble(op, U, T)
+    A3 = assemble(op, U2, T)
+    A4 = assemble(op, U, T2)
 
     x_t = randn(ComplexF64, length(T))
     x_t2 = randn(ComplexF64, length(T2))
@@ -128,10 +142,10 @@
     @test norm(x_test3 - x_s3) / norm(x_s3) < 10^(-2)
     @test norm(x_test4 - x_s4) / norm(x_s4) < 10^(-2)
 
-    @views mul!(x_test1, Bfly1m, x_t)
-    @views mul!(x_test2, Bfly2m, x_t)
-    @views mul!(x_test3, Bfly3m, x_t)
-    @views mul!(x_test4, Bfly4m, x_t2)
+    @views mul!(x_test1[Bfly1m.PermP], Bfly1m, x_t[Bfly1m.PermQ])
+    @views mul!(x_test2[Bfly2m.PermP], Bfly2m, x_t[Bfly2m.PermQ])
+    @views mul!(x_test3[Bfly3m.PermP], Bfly3m, x_t[Bfly3m.PermQ])
+    @views mul!(x_test4[Bfly4m.PermP], Bfly4m, x_t2[Bfly4m.PermQ])
 
     @test norm(x_test1 - x_s1) / norm(x_s1) < 10^(-2)
     @test norm(x_test2 - x_s2) / norm(x_s2) < 10^(-2)

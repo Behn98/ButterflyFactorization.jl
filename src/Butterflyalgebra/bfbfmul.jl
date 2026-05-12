@@ -1,5 +1,5 @@
 function mulBFs(BF_1::BF, BF_2::BF, τ::Float64)
-    @assert BF_1.level == BF_2.level "Both BFs must have the same number of levels"
+    @assert length(BF_1) == length(BF_2) "Both BFs must have the same number of levels"
     @assert BF_1.NS == BF_2.NO "Source and Observer dimensions must match for multiplication"
     M_messenger = Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}()
     for leaf in keys(BF_1.Q)
@@ -8,7 +8,7 @@ function mulBFs(BF_1::BF, BF_2::BF, τ::Float64)
         M_messenger[BF_1.NO, leaf][leaf, BF_2.NS] = BF_1.Q[leaf] * BF_2.P[leaf]
     end
 
-    L = BF_1.level # Number of R-levels
+    L = length(BF_1.R) # Number of R-levels
     M_messenger = mul_factors(BF_1.R[1], M_messenger)
     M_messenger = mul_factors(M_messenger, BF_2.R[L])
 

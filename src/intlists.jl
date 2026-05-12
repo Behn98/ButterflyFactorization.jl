@@ -36,7 +36,9 @@ and the maximum half-size `W` of the two clusters.
 - `false` if they are too close (must be treated as near-field or split further).
 """
 
-function (t::isFarFunctor)(srctree, tsttree, snode, onode)
+function (t::isFarFunctor)(
+    srctree::H2Trees.TwoNTree, tsttree::H2Trees.TwoNTree, snode, onode
+)
     ocenter = H2Trees.center(tsttree, onode)
     olength = H2Trees.halfsize(tsttree, onode)
     scenter = H2Trees.center(srctree, snode)
@@ -58,6 +60,30 @@ function (t::isFarFunctor)(srctree, tsttree, snode, onode)
         else
             return false
         end
+    end
+end
+
+function (t::isFarFunctor)(
+    srctree::H2Trees.BoundingBallTree, tsttree::H2Trees.BoundingBallTree, snode, onode
+)
+    ocenter = H2Trees.center(tsttree, onode)
+    scenter = H2Trees.center(srctree, snode)
+
+    # För BoundingBalls är halfsize exakt sfärens radie
+    olength = H2Trees.radius(tsttree, onode)
+    slength = H2Trees.radius(srctree, snode)
+
+    W = max(slength, olength)
+
+    # Avståndet mellan mittpunkterna
+    dist = norm(scenter - ocenter)
+
+    # Kolla om avståndet minus BÅDA radierna är tillräckligt stort
+    # (Dvs. avståndet mellan sfärernas yttersta kanter)
+    if dist - (olength + slength) > t.α * W
+        return true
+    else
+        return false
     end
 end
 
@@ -117,8 +143,8 @@ Recursively analyzes the interaction between a source node and an observer node.
 """
 
 function process_nodes!(
-    srctree,
-    tsttree,
+    srctree::H2Trees.TwoNTree,
+    tsttree::H2Trees.TwoNTree,
     node_o,
     node_s,
     admissible::isFarFunctor,
@@ -136,6 +162,54 @@ function process_nodes!(
     end
     # split the larger node
     if H2Trees.halfsize(tsttree, node_o) >= H2Trees.halfsize(srctree, node_s)
+        for child_o in collect(children(tsttree, node_o))
+            process_nodes!(
+                srctree,
+                tsttree,
+                child_o,
+                node_s,
+                admissible,
+                farinteractions,
+                nearsv,
+                nearov,
+            )
+        end
+    else
+        for child_s in collect(children(srctree, node_s))
+            process_nodes!(
+                srctree,
+                tsttree,
+                node_o,
+                child_s,
+                admissible,
+                farinteractions,
+                nearsv,
+                nearov,
+            )
+        end
+    end
+end
+
+function process_nodes!(
+    srctree::H2Trees.BoundingBallTree,
+    tsttree::H2Trees.BoundingBallTree,
+    node_o,
+    node_s,
+    admissible::isFarFunctor,
+    farinteractions,
+    nearsv,
+    nearov,
+)
+    if admissible(srctree, tsttree, node_s, node_o)
+        push!(get!(farinteractions, node_o, Int64[]), node_s)
+        return nothing
+    elseif isleaf(tsttree, node_o) && isleaf(srctree, node_s)
+        push!(nearsv, H2Trees.values(srctree, node_s))
+        push!(nearov, H2Trees.values(tsttree, node_o))
+        return nothing
+    end
+    # split the larger node
+    if H2Trees.radius(tsttree, node_o) >= H2Trees.radius(srctree, node_s)
         for child_o in collect(children(tsttree, node_o))
             process_nodes!(
                 srctree,

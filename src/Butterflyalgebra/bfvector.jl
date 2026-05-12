@@ -15,44 +15,42 @@ function apply_BF(Butterfly::BF, v::AbstractVector{ComplexF64})
     NS = Butterfly.NS
     PermQ = Butterfly.PermQ
     PermP = Butterfly.PermP
-    coefficients = Dict{Int,Dict{Tuple{Int,Int},Vector{ComplexF64}}}()
-    #H2Blocktree = Butterfly.tree
-    #trialT = H2Trees.trialtree(H2Blocktree)
-    #testT = H2Trees.testtree(H2Blocktree)
 
-    #values = H2Trees.values
+    # Endast en dict för nuvarande nivå behövs initialt
+    coeffs_current = Dict{Tuple{Int,Int},Vector{ComplexF64}}()
 
     # ------------------------------------------------------------
-    # Leaf initialization
+    # Leaf initialization (Q)
     # ------------------------------------------------------------
     for Sleaf in keys(Q)
-        srcvals = PermQ[Sleaf]  # Get the permuted source indices for this leaf
-        getsubdict!(coefficients, 0)[(NO, Sleaf)] = Vector{ComplexF64}(
-            undef, size(Q[Sleaf])[1]
-        )
-        @views mul!(coefficients[0][(NO, Sleaf)], Q[Sleaf], v[srcvals])
+        srcvals = PermQ[Sleaf]
+
+        # Allokera och beräkna direkt
+        coeffs_current[(NO, Sleaf)] = Vector{ComplexF64}(undef, size(Q[Sleaf], 1))
+        @views mul!(coeffs_current[(NO, Sleaf)], Q[Sleaf], v[srcvals])
     end
 
-    # Step 2: Sequentially apply R factors
+    # Step 2: Sequentially apply R factors (Ping-Pong strategi)
     for l in eachindex(R)
+        coeffs_next = Dict{Tuple{Int,Int},Vector{ComplexF64}}()
+
         for row in keys(R[l])
-            first = true
             for col in keys(R[l][row])
-                if first
-                    getsubdict!(coefficients, l)[row] = Vector{ComplexF64}(
-                        undef, size(R[l][row][col])[1]
-                    )
-                    @views mul!(
-                        coefficients[l][row], R[l][row][col], coefficients[l - 1][col]
-                    )
-                    first = false
+                if !haskey(coeffs_next, row)
+                    # Skapa ny vektor för första kolumn-bidraget
+                    coeffs_next[row] = Vector{ComplexF64}(undef, size(R[l][row][col], 1))
+                    @views mul!(coeffs_next[row], R[l][row][col], coeffs_current[col])
                 else
-                    coeff_temp = Vector{ComplexF64}(undef, size(R[l][row][col])[1])
-                    @views mul!(coeff_temp, R[l][row][col], coefficients[l - 1][col])
-                    coefficients[l][row] += coeff_temp
+                    # Addera till existerande vektor vektor med temporär minneshantering
+                    coeff_temp = Vector{ComplexF64}(undef, size(R[l][row][col], 1))
+                    @views mul!(coeff_temp, R[l][row][col], coeffs_current[col])
+                    coeffs_next[row] .+= coeff_temp
                 end
             end
         end
+
+        # Flytta next till current inför nästa nivå
+        coeffs_current = coeffs_next
     end
 
     # Step 3: Apply P to the result from the last R factor
@@ -61,9 +59,9 @@ function apply_BF(Butterfly::BF, v::AbstractVector{ComplexF64})
     # ------------------------------------------------------------
     result = zeros(ComplexF64, Butterfly.dim[1])
     for Oleaf in keys(P)
-        inds = PermP[Oleaf]  # Get the permuted observer indices for this leaf
+        inds = PermP[Oleaf]
         dest = @view result[inds]
-        mul!(dest, P[Oleaf], coefficients[length(R)][(Oleaf, NS)])
+        mul!(dest, P[Oleaf], coeffs_current[(Oleaf, NS)])
     end
     return result
 end
@@ -78,33 +76,12 @@ end
 end
 
 function applyBF_Mats(t::BF_Mats, v::AbstractVector{ComplexF64})
-    y = v  #permute input vector according to Q blocks
+    y = v
     y = t.Q * y
     for R_block in t.R
         y = R_block * y
     end
-    y = t.P * y
-    return y
-end
-
-function applyBF_Mats_adjoint(t::BF_Mats, v::AbstractVector{ComplexF64})
-    # Gather input using the observer permutation
-    y = v[t.PermP]
-
-    # Adjoint of P
-    y = t.P' * y
-
-    # Adjoint of R blocks in reverse order
-    for R_block in Iterators.reverse(t.R)
-        y = R_block' * y
-    end
-
-    # Adjoint of Q
-    y = t.Q' * y
-
-    # Scatter output to the correct geometric source coordinates
-    y_out = zeros(ComplexF64, size(t, 1))
-    y_out[t.PermQ] = y
-
-    return y_out
+    result = zeros(ComplexF64, size(t, 1))
+    result = t.P * y
+    return result
 end

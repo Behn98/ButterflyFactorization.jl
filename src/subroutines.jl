@@ -10,11 +10,12 @@ necessary index permutations to allow for correct, independent Matrix-Vector (MV
 products without permanently storing the tree.
 
 **Arguments:**
-- `kernelmatrix`: Function computing matrix entries for specified row/column indices.
-- `H2Blocktree`: The paired source-observer tree structure.
-- `NO`, `NS`: The root IDs of the observer (test) and source (trial) spaces.
-- `k`, `τ`: Wavenumber (crucial for rank estimation) and precision tolerance.
-- `Compressor`: Compression scheme for low-rank blocks (default: `PartialQR`).
+
+  - `kernelmatrix`: Function computing matrix entries for specified row/column indices.
+  - `H2Blocktree`: The paired source-observer tree structure.
+  - `NO`, `NS`: The root IDs of the observer (test) and source (trial) spaces.
+  - `k`, `τ`: Wavenumber (crucial for rank estimation) and precision tolerance.
+  - `Compressor`: Compression scheme for low-rank blocks (default: `PartialQR`).
 
 **Why Dictionary format?**
 It is extremely memory efficient because it avoids the overhead of saving nonzero entry
@@ -36,7 +37,6 @@ function subroutine_BF(
     # --- containers ---
     Q = Dict{Int,Matrix{ComplexF64}}()
     K = Dict{Int,Dict{Int,Vector{Int}}}()
-    U = Dict{Int,Dict{Int,Vector{Int}}}()   #temporary unions
 
     PermQ = Dict{Int,Vector{Int}}()
     PermP = Dict{Int,Vector{Int}}()
@@ -45,9 +45,8 @@ function subroutine_BF(
     testT = H2Trees.testtree(H2Blocktree)
 
     values = H2Trees.values
-    center = H2Trees.center
-    halfsize = H2Trees.halfsize
     children = H2Trees.children
+    isleaf = H2Trees.isleaf
 
     treeS = traverseandpad(trialT, NS)
     treeO = traverseandpad(testT, NO)
@@ -73,13 +72,8 @@ function subroutine_BF(
         #higher levels, but we assume the tree is balanced enough that this is not a problem
         srcindex = values(trialT, Sleaf)
         obsindex = values(testT, NO)
-        c_s = center(trialT, Sleaf)
-        c_o = center(testT, NO)
-        a_s = halfsize(trialT, Sleaf)
-        a_o = halfsize(testT, NO)
-        #PermQ[Sleaf] = srcindex
         PermQ[Sleaf] = [src_map[g] for g in srcindex]
-        n_otilde = estimate_rank_3d(k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3)
+        n_otilde = estimate_rank_3d(k, trialT, testT, Sleaf, NO, τ; C=1.0, Cε=3.0, Rmin=3)
         q_ks, k_l, r_l = Compressor(kernelmatrix, srcindex, obsindex, n_otilde, τ)
 
         Q[Sleaf] = q_ks
@@ -103,17 +97,24 @@ function subroutine_BF(
         # --------------------------------------------------------------
         # Build U (union of child skeletons)
         # --------------------------------------------------------------
+        U = Dict{Int,Dict{Int,Vector{Int}}}()   #temporary unions
         if !source_is_frozen
             for Svert in treeS[LS - l]
                 U_S = getsubdict!(U, Svert)
 
                 for Overt in treeO[min(l, LO)]
                     temp = Int[]
-
-                    for Schild in children(trialT, Svert)
-                        Ks = getsubdict!(K, Schild)
-                        ks = get(Ks, Overt, nothing)
-                        append!(temp, ks)
+                    if !isleaf(Svert, trialT)
+                        for Schild in children(trialT, Svert)
+                            Ks = getsubdict!(K, Schild)
+                            ks = get(Ks, Overt, nothing)
+                            if ks === nothing
+                                continue
+                            end
+                            append!(temp, ks)
+                        end
+                    else
+                        temp = K[Svert][Overt]
                     end
 
                     U_S[Overt] = temp
@@ -125,50 +126,86 @@ function subroutine_BF(
         # Compute R blocks
         # --------------------------------------------------------------
         if !source_is_frozen && !obs_is_frozen
-            rowsizeR = 0
             for Overt in treeO[l]
-                for Ochild in children(testT, Overt)
-                    obsindex = values(testT, Ochild)
-                    isempty(obsindex) && continue
-                    c_o = center(testT, Ochild)
-                    a_o = halfsize(testT, Ochild)
+                if !isleaf(Overt, testT)
+                    for Ochild in children(testT, Overt)
+                        obsindex = values(testT, Ochild)
+                        isempty(obsindex) && continue
+                        for Svert in treeS[LS - l]
+                            srcindex = U[Svert][Overt]
+                            if isempty(srcindex)
+                                @show "Warning: empty source index for Svert $Svert and Ochild $Overt at level $l. This should not happen if the tree is properly balanced."
+                                continue
+                            end
+                            n_otilde = estimate_rank_3d(
+                                k, trialT, testT, Svert, Ochild, τ; C=1.0, Cε=3.0, Rmin=3
+                            )
+
+                            q_ks, k_l, r_l = Compressor(
+                                kernelmatrix, srcindex, obsindex, n_otilde, τ
+                            )
+                            last = 0
+                            if !isleaf(Schild, trialT)
+                                for Schild in children(trialT, Svert)
+                                    if !haskey(K, Schild) || !haskey(K[Schild], Overt)
+                                        @show "Warning: missing K entry for Schild $Schild and Overt $Overt at level $l. This should not happen if the tree is properly balanced."
+                                        continue
+                                    end
+                                    ks = length(getsubdict!(K, Schild)[Overt])
+                                    getsubdict!(R[l], (Ochild, Svert))[(Overt, Schild)] = q_ks[
+                                        :, (last + 1):(last + ks)
+                                    ]
+                                    last += ks
+                                end
+                                getsubdict!(K, Svert)[Ochild] = k_l
+                            else
+                            end
+                        end
+                    end
+                else
+                    obsindex = values(testT, Overt)
                     for Svert in treeS[LS - l]
                         srcindex = U[Svert][Overt]
-                        c_s = center(trialT, Svert)
-                        a_s = halfsize(trialT, Svert)
+                        if isempty(srcindex)
+                            @show "Warning: empty source index for Svert $Svert and Ochild $Overt at level $l. This should not happen if the tree is properly balanced."
+                            continue
+                        end
                         n_otilde = estimate_rank_3d(
-                            k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3
+                            k, trialT, testT, Svert, Overt, τ; C=1.0, Cε=3.0, Rmin=3
                         )
                         q_ks, k_l, r_l = Compressor(
                             kernelmatrix, srcindex, obsindex, n_otilde, τ
                         )
+
                         last = 0
                         for Schild in children(trialT, Svert)
+                            if !haskey(K, Schild) || !haskey(K[Schild], Overt)
+                                @show "Warning: missing K entry for Schild $Schild and Overt $Overt at level $l. This should not happen if the tree is properly balanced."
+                                continue
+                            end
                             ks = length(getsubdict!(K, Schild)[Overt])
-                            getsubdict!(R[l], (Ochild, Svert))[(Overt, Schild)] = q_ks[
+                            getsubdict!(R[l], (Overt, Svert))[(Overt, Schild)] = q_ks[
                                 :, (last + 1):(last + ks)
                             ]
                             last += ks
                         end
-                        getsubdict!(K, Svert)[Ochild] = k_l
+                        getsubdict!(K, Svert)[Overt] = k_l
                     end
                 end
             end
 
         elseif source_is_frozen && !obs_is_frozen
-            @show source_is_frozen
             for Overt in treeO[l]
                 for Ochild in children(testT, Overt)
                     obsindex = values(testT, Ochild)
-                    c_o = center(testT, Ochild)
-                    a_o = halfsize(testT, Ochild)
                     for Svert in treeS[1]
                         srcindex = K[Svert][Overt]
-                        c_s = center(trialT, Svert)
-                        a_s = halfsize(trialT, Svert)
-
+                        if isempty(srcindex)
+                            @show "Warning: empty source index for Svert $Svert and Ochild $Overt at level $l. This should not happen if the tree is properly balanced."
+                            continue
+                        end
                         n_otilde = estimate_rank_3d(
-                            k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3
+                            k, trialT, testT, Svert, Ochild, τ; C=1.0, Cε=3.0, Rmin=3
                         )
                         q_ks, k_l, r_l = Compressor(
                             kernelmatrix, srcindex, obsindex, n_otilde, τ
@@ -183,17 +220,14 @@ function subroutine_BF(
         elseif !source_is_frozen && obs_is_frozen
             for Overt in treeO[LO]
                 obsindex = values(testT, Overt)
-                c_o = center(testT, Overt)
-                a_o = halfsize(testT, Overt)
                 for Svert in treeS[LS - l]
                     srcindex = U[Svert][Overt]
-
-                    c_s = center(trialT, Svert)
-
-                    a_s = halfsize(trialT, Svert)
-
+                    if isempty(srcindex)
+                        @show "Warning: empty source index for Svert $Svert and Ochild $Overt at level $l. This should not happen if the tree is properly balanced."
+                        continue
+                    end
                     n_otilde = estimate_rank_3d(
-                        k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3
+                        k, trialT, testT, Svert, Overt, τ; C=1.0, Cε=3.0, Rmin=3
                     )
                     q_ks, k_l, r_l = Compressor(
                         kernelmatrix, srcindex, obsindex, n_otilde, τ
@@ -201,6 +235,10 @@ function subroutine_BF(
 
                     last = 0
                     for Schild in children(trialT, Svert)
+                        if !haskey(K, Schild) || !haskey(K[Schild], Overt)
+                            @show "Warning: missing K entry for Schild $Schild and Overt $Overt at level $l. This should not happen if the tree is properly balanced."
+                            continue
+                        end
                         ks = length(getsubdict!(K, Schild)[Overt])
                         getsubdict!(R[l], (Overt, Svert))[(Overt, Schild)] = q_ks[
                             :, (last + 1):(last + ks)
@@ -221,12 +259,15 @@ function subroutine_BF(
     # ------------------------------------------------------------------
     P = Dict{Int,Matrix{ComplexF64}}()
     for Oleaf in treeO[LO]
+        if !haskey(K[NS], Oleaf)
+            @show "Warning: missing K entry for NS $NS and Oleaf $Oleaf at final P block construction. This should not happen if the tree is properly balanced."
+            continue
+        end
         col = K[NS][Oleaf]
         row = values(testT, Oleaf)
 
         Z = zeros(ComplexF64, length(row), length(col))
         kernelmatrix(Z, row, col)
-        #PermP[Oleaf] = row
         PermP[Oleaf] = [obs_map[g] for g in row]
         P[Oleaf] = Z
     end
@@ -304,11 +345,7 @@ function subroutine_BF_mats(
         srcindex = values(trialT, Sleaf)
         push!(PermQ, srcindex...)
         obsindex = values(testT, NO)
-        c_s = center(trialT, Sleaf)
-        c_o = center(testT, NO)
-        a_s = halfsize(trialT, Sleaf)
-        a_o = halfsize(testT, NO)
-        n_otilde = estimate_rank_3d(k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3)
+        n_otilde = estimate_rank_3d(k, trialT, testT, Sleaf, NO, τ; C=1.0, Cε=3.0, Rmin=3)
         q_ks, k_l, r_l = Compressor(kernelmatrix, srcindex, obsindex, n_otilde, τ)
         Q = sparse_blockdiag(Q, q_ks)               #SPARSITY: sparse_ or blocksparse_
         getsubdict!(K, Sleaf)[NO] = k_l
@@ -354,15 +391,11 @@ function subroutine_BF_mats(
                 for Ochild in children(testT, Overt)
                     R_temp3 = Matrix{ComplexF64}(undef, 0, 0)
                     obsindex = values(testT, Ochild)
-                    c_o = center(testT, Ochild)
-                    a_o = halfsize(testT, Ochild)
                     for Svert in treeS[LS - l]
                         srcindex = U[Svert][Overt]
-                        c_s = center(trialT, Svert)
-                        a_s = halfsize(trialT, Svert)
 
                         n_otilde = estimate_rank_3d(
-                            k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3
+                            k, trialT, testT, Svert, Ochild, τ; C=1.0, Cε=3.0, Rmin=3
                         )
                         q_ks, k_l, r_l = Compressor(
                             kernelmatrix, srcindex, obsindex, n_otilde, τ
@@ -380,22 +413,16 @@ function subroutine_BF_mats(
             push!(R, R_temp1)
 
         elseif source_is_frozen && !obs_is_frozen
-            @show source_is_frozen
             R_temp1 = Matrix{ComplexF64}(undef, 0, 0)
             for Overt in treeO[l]
                 R_temp2 = Vector{AbstractMatrix{ComplexF64}}()          #AbstractMatrix for SparseArrays, BlockSparseMatrix for BlockSparseMatrices
                 for Ochild in children(testT, Overt)
                     R_temp3 = Matrix{ComplexF64}(undef, 0, 0)
                     obsindex = values(testT, Ochild)
-                    c_o = center(testT, Ochild)
-                    a_o = halfsize(testT, Ochild)
                     for Svert in treeS[1]
                         srcindex = K[Svert][Overt]
-                        c_s = center(trialT, Svert)
-                        a_s = halfsize(trialT, Svert)
-
                         n_otilde = estimate_rank_3d(
-                            k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3
+                            k, trialT, testT, Svert, Ochild, τ; C=1.0, Cε=3.0, Rmin=3
                         )
                         q_ks, k_l, r_l = Compressor(
                             kernelmatrix, srcindex, obsindex, n_otilde, τ
@@ -417,16 +444,11 @@ function subroutine_BF_mats(
             for Overt in treeO[LO]
                 obsindex = values(testT, Overt)
                 R_temp2 = Matrix{ComplexF64}(undef, 0, 0)
-                c_o = center(testT, Overt)
-                a_o = halfsize(testT, Overt)
                 for Svert in treeS[LS - l]
                     srcindex = U[Svert][Overt]
 
-                    c_s = center(trialT, Svert)
-                    a_s = halfsize(trialT, Svert)
-
                     n_otilde = estimate_rank_3d(
-                        k, c_s, c_o, a_s, a_o, τ; C=1.0, Cε=3.0, Rmin=3
+                        k, trialT, testT, Svert, Overt, τ; C=1.0, Cε=3.0, Rmin=3
                     )
                     q_ks, k_l, r_l = Compressor(
                         kernelmatrix, srcindex, obsindex, n_otilde, τ

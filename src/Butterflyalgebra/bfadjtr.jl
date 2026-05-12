@@ -48,9 +48,7 @@ function Base.transpose(B::ButterflyFactorization.BF)
                         Tuple{Int,Int},AbstractMatrix{ComplexF64}
                     }()
                 end
-                R_tr[newl][reverse(nodeO)][nodeS] = transpose(
-                    B.R[l][reverse(nodeS)][reverse(nodeO)]
-                )
+                R_tr[newl][reverse(nodeO)][reverse(nodeS)] = transpose(B.R[l][nodeS][nodeO])
             end
         end
     end

@@ -10,16 +10,18 @@ this new struct is of pure algebraic interest and has lost its physical meaningf
 as much as it would ve if we were to add the two matrices behind them. Also be aware that im
 only tackling the symetric case of a BF.=#
 
-function add_eqbf(BF1::BF, BF_2::BF, τ)
+function add_eqbfs(BF1::BF, BF_2::BF, τ)
     @assert BF1.NS == BF_2.NS && BF1.NO == BF_2.NO "rootids must match for addition."
     # --- Case 1: Same source and observer clusters ---
-    R_new = Dict{Int,Dict{Int,Dict{Int,AbstractMatrix{ComplexF64}}}}()
-    for l in keys(BF1.R)
-        R_new[l] = Dict{Int,Dict{Int,AbstractMatrix{ComplexF64}}}()
+    R_new = Vector{Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}}(
+        undef, length(BF1.R)
+    )
+    for l in eachindex(BF1.R)
+        R_new[l] = Dict{Tuple{Int,Int},Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}}()
         for nodeS in keys(BF1.R[l])
             for nodeO in keys(BF1.R[l][nodeS])
                 if !haskey(R_new[l], nodeS)
-                    R_new[l][nodeS] = Dict{Int,AbstractMatrix{ComplexF64}}()
+                    R_new[l][nodeS] = Dict{Tuple{Int,Int},AbstractMatrix{ComplexF64}}()
                 end
                 R_new[l][nodeS][nodeO] = sparse_blockdiag(
                     BF1.R[l][nodeS][nodeO], BF_2.R[l][nodeS][nodeO]
@@ -36,6 +38,7 @@ function add_eqbf(BF1::BF, BF_2::BF, τ)
     for k in keys(BF1.P)
         P_new[k] = hcat(BF1.P[k], BF_2.P[k])
     end
+
     return recompress_BF(
         BF(
             Q_new,
@@ -53,6 +56,6 @@ function add_eqbf(BF1::BF, BF_2::BF, τ)
     )
 end
 
-function add_neqbf(BF1::BF, BF_2::BF)
+function add_neqbfs(BF1::BF, BF_2::BF)
     return (BF1, BF_2)   #insert struct here if needed
 end

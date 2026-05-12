@@ -102,16 +102,61 @@ An `Int` representing the conservatively estimated rank `r` for the block.
 
 function estimate_rank_3d(
     k,
-    c_s::SVector,
-    c_o::SVector,
-    a_s::Float64,
-    a_o::Float64,
-    ε::Float64,
-    ;
+    trialT::H2Trees.TwoNTree,
+    testT::H2Trees.TwoNTree,
+    Snode::Int,
+    Onode::Int,
+    ε::Float64;
     C=1.0,
     Cε=3.0,
-    Rmin=5,
+    Rmin=3,
 )
+    center = H2Trees.center
+    halfsize = H2Trees.halfsize
+
+    # Extract geometric information from the tree nodes
+    c_s = center(trialT, Snode)
+    c_o = center(testT, Onode)
+    a_s = halfsize(trialT, Snode)
+    a_o = halfsize(testT, Onode)
+
+    # Center separation
+    d = norm(c_s .- c_o)
+
+    # Minimum separation (avoid singular or near-field cases)
+    dmin = max(d - 0.5 * (a_s + a_o), 1e-12)
+
+    # Geometric directional rank estimate
+    R_geom = C * k * (a_s * a_o) / dmin
+
+    # Tolerance-dependent padding
+    R_tol = Cε * log(1 / ε)
+
+    # Final rank
+    R = ceil(Int, R_geom + R_tol)
+
+    return max(R, Rmin)
+end
+
+function estimate_rank_3d(
+    k,
+    trialT::H2Trees.BoundingBallTree,
+    testT::H2Trees.BoundingBallTree,
+    Snode::Int,
+    Onode::Int,
+    ε::Float64;
+    C=1.0,
+    Cε=3.0,
+    Rmin=3,
+)
+    center = H2Trees.center
+    radius = H2Trees.radius
+
+    # Extract geometric information from the tree nodes
+    c_s = center(trialT, Snode)
+    c_o = center(testT, Onode)
+    a_s = radius(trialT, Snode)
+    a_o = radius(testT, Onode)
 
     # Center separation
     d = norm(c_s .- c_o)

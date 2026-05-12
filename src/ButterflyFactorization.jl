@@ -37,7 +37,6 @@ include("ButterflyFactorization/matrixstructs.jl")
 include("ButterflyFactorization/petrovgalerkinbf.jl")
 
 include("matrixalgebra/dims.jl")
-include("matrixalgebra/matrixadjtr.jl")
 include("matrixalgebra/matrixvector.jl")
 include("matrixalgebra/matrixmatrix.jl")
 

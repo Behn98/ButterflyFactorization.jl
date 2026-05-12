@@ -265,6 +265,35 @@ function h2treelevels(tree::T, root::Int64) where {T}
     return levels
 end
 
+function h2emptynodes(tree::T, root::Int64) where {T}
+    isleaf = H2Trees.isleaf
+    getchildren = H2Trees.children
+    getvalues = H2Trees.values
+
+    # Stores the empty nodes per level
+    empty_levels = Vector{Vector{Int}}()
+
+    current = [root]
+
+    while !isempty(current)
+        # Hitta alla tomma noder på den aktuella nivån
+        empty_current = filter(node -> isempty(getvalues(tree, node)), current)
+        push!(empty_levels, empty_current)
+
+        next = Int[]
+        # Bygg upp nästa nivå genom att samla alla barn från den nuvarande nivån
+        for node in current
+            if !isleaf(tree, node)
+                append!(next, getchildren(tree, node))
+            end
+        end
+
+        current = next
+    end
+
+    return empty_levels
+end
+
 """
     traverseandpad(H2tree, root)
 
