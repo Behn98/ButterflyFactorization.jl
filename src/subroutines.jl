@@ -104,7 +104,7 @@ function subroutine_BF(
 
                 for Overt in treeO[min(l, LO)]
                     temp = Int[]
-                    if !isleaf(Svert, trialT)
+                    if !isleaf(trialT, Svert)
                         for Schild in children(trialT, Svert)
                             Ks = getsubdict!(K, Schild)
                             ks = get(Ks, Overt, nothing)
@@ -127,7 +127,7 @@ function subroutine_BF(
         # --------------------------------------------------------------
         if !source_is_frozen && !obs_is_frozen
             for Overt in treeO[l]
-                if !isleaf(Overt, testT)
+                if !isleaf(testT, Overt)
                     for Ochild in children(testT, Overt)
                         obsindex = values(testT, Ochild)
                         isempty(obsindex) && continue
@@ -144,8 +144,8 @@ function subroutine_BF(
                             q_ks, k_l, r_l = Compressor(
                                 kernelmatrix, srcindex, obsindex, n_otilde, τ
                             )
-                            last = 0
-                            if !isleaf(Schild, trialT)
+                            if !isleaf(trialT, Svert)
+                                last = 0
                                 for Schild in children(trialT, Svert)
                                     if !haskey(K, Schild) || !haskey(K[Schild], Overt)
                                         @show "Warning: missing K entry for Schild $Schild and Overt $Overt at level $l. This should not happen if the tree is properly balanced."
@@ -157,37 +157,42 @@ function subroutine_BF(
                                     ]
                                     last += ks
                                 end
-                                getsubdict!(K, Svert)[Ochild] = k_l
+
                             else
+                                getsubdict!(R[l], (Ochild, Svert))[(Overt, Svert)] = q_ks
                             end
+                            getsubdict!(K, Svert)[Ochild] = k_l
                         end
                     end
                 else
                     obsindex = values(testT, Overt)
                     for Svert in treeS[LS - l]
-                        srcindex = U[Svert][Overt]
-                        if isempty(srcindex)
-                            @show "Warning: empty source index for Svert $Svert and Ochild $Overt at level $l. This should not happen if the tree is properly balanced."
-                            continue
-                        end
-                        n_otilde = estimate_rank_3d(
-                            k, trialT, testT, Svert, Overt, τ; C=1.0, Cε=3.0, Rmin=3
-                        )
-                        q_ks, k_l, r_l = Compressor(
-                            kernelmatrix, srcindex, obsindex, n_otilde, τ
-                        )
-
-                        last = 0
-                        for Schild in children(trialT, Svert)
-                            if !haskey(K, Schild) || !haskey(K[Schild], Overt)
-                                @show "Warning: missing K entry for Schild $Schild and Overt $Overt at level $l. This should not happen if the tree is properly balanced."
+                        if !isleaf(trialT, Svert)
+                            srcindex = U[Svert][Overt]
+                            if isempty(srcindex)
+                                @show "Warning: empty source index for Svert $Svert and Ochild $Overt at level $l. This should not happen if the tree is properly balanced."
                                 continue
                             end
-                            ks = length(getsubdict!(K, Schild)[Overt])
-                            getsubdict!(R[l], (Overt, Svert))[(Overt, Schild)] = q_ks[
-                                :, (last + 1):(last + ks)
-                            ]
-                            last += ks
+                            n_otilde = estimate_rank_3d(
+                                k, trialT, testT, Svert, Overt, τ; C=1.0, Cε=3.0, Rmin=3
+                            )
+                            q_ks, k_l, r_l = Compressor(
+                                kernelmatrix, srcindex, obsindex, n_otilde, τ
+                            )
+                            last = 0
+                            for Schild in children(trialT, Svert)
+                                if !haskey(K, Schild) || !haskey(K[Schild], Overt)
+                                    @show "Warning: missing K entry for Schild $Schild and Overt $Overt at level $l. This should not happen if the tree is properly balanced."
+                                    continue
+                                end
+                                ks = length(getsubdict!(K, Schild)[Overt])
+                                getsubdict!(R[l], (Overt, Svert))[(Overt, Schild)] = q_ks[
+                                    :, (last + 1):(last + ks)
+                                ]
+                                last += ks
+                            end
+                        else
+                            getsubdict!(R[l], (Overt, Svert))[(Overt, Svert)] = q_ks
                         end
                         getsubdict!(K, Svert)[Overt] = k_l
                     end
@@ -196,24 +201,27 @@ function subroutine_BF(
 
         elseif source_is_frozen && !obs_is_frozen
             for Overt in treeO[l]
-                for Ochild in children(testT, Overt)
-                    obsindex = values(testT, Ochild)
-                    for Svert in treeS[1]
-                        srcindex = K[Svert][Overt]
-                        if isempty(srcindex)
-                            @show "Warning: empty source index for Svert $Svert and Ochild $Overt at level $l. This should not happen if the tree is properly balanced."
-                            continue
+                if !isleaf(testT, Overt)
+                    for Ochild in children(testT, Overt)
+                        obsindex = values(testT, Ochild)
+                        for Svert in treeS[1]
+                            srcindex = K[Svert][Overt]
+                            if isempty(srcindex)
+                                @show "Warning: empty source index for Svert $Svert and Ochild $Overt at level $l. This should not happen if the tree is properly balanced."
+                                continue
+                            end
+                            n_otilde = estimate_rank_3d(
+                                k, trialT, testT, Svert, Ochild, τ; C=1.0, Cε=3.0, Rmin=3
+                            )
+                            q_ks, k_l, r_l = Compressor(
+                                kernelmatrix, srcindex, obsindex, n_otilde, τ
+                            )
+                            last = 0
+                            getsubdict!(R[l], (Ochild, Svert))[(Overt, Svert)] = q_ks
+                            getsubdict!(K, Svert)[Ochild] = k_l
                         end
-                        n_otilde = estimate_rank_3d(
-                            k, trialT, testT, Svert, Ochild, τ; C=1.0, Cε=3.0, Rmin=3
-                        )
-                        q_ks, k_l, r_l = Compressor(
-                            kernelmatrix, srcindex, obsindex, n_otilde, τ
-                        )
-                        last = 0
-                        getsubdict!(R[l], (Ochild, Svert))[(Overt, Svert)] = q_ks
-                        getsubdict!(K, Svert)[Ochild] = k_l
                     end
+                else
                 end
             end
 
@@ -232,20 +240,22 @@ function subroutine_BF(
                     q_ks, k_l, r_l = Compressor(
                         kernelmatrix, srcindex, obsindex, n_otilde, τ
                     )
-
-                    last = 0
-                    for Schild in children(trialT, Svert)
-                        if !haskey(K, Schild) || !haskey(K[Schild], Overt)
-                            @show "Warning: missing K entry for Schild $Schild and Overt $Overt at level $l. This should not happen if the tree is properly balanced."
-                            continue
+                    if !isleaf(trialT, Svert)
+                        last = 0
+                        for Schild in children(trialT, Svert)
+                            if !haskey(K, Schild) || !haskey(K[Schild], Overt)
+                                @show "Warning: missing K entry for Schild $Schild and Overt $Overt at level $l. This should not happen if the tree is properly balanced."
+                                continue
+                            end
+                            ks = length(getsubdict!(K, Schild)[Overt])
+                            getsubdict!(R[l], (Overt, Svert))[(Overt, Schild)] = q_ks[
+                                :, (last + 1):(last + ks)
+                            ]
+                            last += ks
                         end
-                        ks = length(getsubdict!(K, Schild)[Overt])
-                        getsubdict!(R[l], (Overt, Svert))[(Overt, Schild)] = q_ks[
-                            :, (last + 1):(last + ks)
-                        ]
-                        last += ks
+                        getsubdict!(K, Svert)[Overt] = k_l
+                    else
                     end
-                    getsubdict!(K, Svert)[Overt] = k_l
                 end
             end
 
